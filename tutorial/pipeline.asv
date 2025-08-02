@@ -7,27 +7,22 @@ eeglab; close;
 locPath = fileparts(which('dipfitdefs.m'));  % for electrodes locations
 
 % fileparts(which('eegplugin_ascent.m'))
+
 addpath("D:\MATLAB\Ascent")
 addpath("D:\MATLAB\Ascent\functions")
 
-%%%%%%%%%%%%%%%%%%%%%% PARAMETERS %%%%%%%%%%%%%%%%%%%%%%
-nScales = 40;
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-
-
-% Filenames
+addpath()
 filenames = dir('*.bdf');
 filenames = {filenames.name}';
 nFiles = length(filenames);
 
-
-PWR = nan(64, 247, nFiles);
 ApEn = nan(64,nFiles);
 SampEn = nan(64,nFiles);
 FuzEn = nan(64,nFiles);
 FracDim = nan(64,nFiles);
-MSE = nan(64, nScales, nFiles);
+MSE = nan(64,nFiles);
+PWR = nan(64, 247, nFiles);
 for iFile = 1:nFiles
     % Load BDF data
     EEG = pop_biosig(fullfile(data_path, filenames{iFile}));
@@ -70,23 +65,23 @@ for iFile = 1:nFiles
     set(findall(gcf,'type','axes'),'fontSize',9,'fontweight','bold');
     PWR(:,:,iFile) = psd_norm;
 
-    % % Simple Heatmap of power spectrum
-    % figure('color', 'w');
-    % imagesc(f, 1:length(f), psd_norm);
-    % colormap("parula")
-    % c = colorbar; ylabel(c, 'Power (dB)','FontWeight','bold','FontSize',11,'Rotation',-90)
-    % xlabel('Frequency (Hz)'); ylabel('EEG channels'); title('Power spectrum heatmap')
-    % set(findall(gcf,'type','axes'),'fontSize',9,'fontweight','bold');
-    % 
-    % % Correlatin matrix
-    % correlationMatrix = corr(psd_norm, 'Type', 'Pearson');
-    % figure('color', 'w');   
-    % imagesc(f, f, abs(correlationMatrix)); 
-    % colormap("parula"); 
-    % c = colorbar; ylabel(c, 'R^2','FontWeight','bold','FontSize',9)
-    % xlim([0 30]); ylim([0 30]); axis tight
-    % xlabel('Frequency (Hz)'); ylabel('Frequency (Hz)'); title('Correlation matrix (frequency domain)')
-    % set(findall(gcf,'type','axes'),'fontSize',9,'fontweight','bold');
+    % Simple Heatmap of power spectrum
+    figure('color', 'w');
+    imagesc(f, 1:length(f), psd_norm);
+    colormap("parula")
+    c = colorbar; ylabel(c, 'Power (dB)','FontWeight','bold','FontSize',11,'Rotation',-90)
+    xlabel('Frequency (Hz)'); ylabel('EEG channels'); title('Power spectrum heatmap')
+    set(findall(gcf,'type','axes'),'fontSize',9,'fontweight','bold');
+
+    % Correlatin matrix
+    correlationMatrix = corr(psd_norm, 'Type', 'Pearson');
+    figure('color', 'w');   
+    imagesc(f, f, abs(correlationMatrix)); 
+    colormap("parula"); 
+    c = colorbar; ylabel(c, 'R^2','FontWeight','bold','FontSize',9)
+    xlim([0 30]); ylim([0 30]); axis tight
+    xlabel('Frequency (Hz)'); ylabel('Frequency (Hz)'); title('Correlation matrix (frequency domain)')
+    set(findall(gcf,'type','axes'),'fontSize',9,'fontweight','bold');
 
     % % Correlatin matrix
     % correlationMatrix = corr(EEG.data, 'Type', 'Pearson');
@@ -114,25 +109,29 @@ for iFile = 1:nFiles
     % set(findall(gcf,'type','axes'),'fontSize',9,'fontweight','bold');
 
 
+    % % ApEn
+    % EEG = get_entropy(EEG,'Approximate entropy',[],[],[],[],[],[],[],false);
+    % ApEn(:,iFile) = EEG.entropy;
+
     % SampEn
     EEG = ascent_compute(EEG,'Sample entropy',[],[],[],[],[],[],[],false);
     SampEn(:,iFile) = EEG.entropy;
-    ascent_plot(EEG.entropy, EEG.chanlocs, 'Sample entropy', []);
+    % plot_entropy(EEG.entropy, EEG.chanlocs, 'Sample entropy', []);
 
     % FuzEn
     EEG = ascent_compute(EEG,'Fuzzy entropy',[],[],[],[],[],[],[],false);
     FuzEn(:,iFile) = EEG.entropy;
-    ascent_plot(EEG.entropy, EEG.chanlocs, 'Fuzzy entropy', []);
+    plot_entropy(EEG.entropy, EEG.chanlocs, 'Fuzzy entropy', []);
 
     % Fractal votality
     EEG = ascent_compute(EEG,'Fractal votality',[],[],[],[],[],[],[],false);
     FracDim(:,iFile) = EEG.entropy;
-    ascent_plot(EEG.entropy, EEG.chanlocs, 'Fractal votality', []);
+    % plot_entropy(EEG.entropy, EEG.chanlocs, 'Fractal votality', []);
 
     % MSE
-    EEG = ascent_compute(EEG,'Multiscale entropy',[],[],[],[],nScales,[],[],false);
+    EEG = ascent_compute(EEG,'Multiscale entropy',[],[],[],[],20,[],[],false);
     MSE(:,:,iFile) = EEG.entropy;
-    ascent_plot(EEG.entropy, EEG.chanlocs, 'Multiscale Entropy', EEG.scales);
+    plot_entropy(EEG.entropy, EEG.chanlocs, 'Multiscale Entropy', []);
 
 end
 

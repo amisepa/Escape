@@ -79,7 +79,7 @@ for iScale = 1:nScales
         end
     end
 
-    % Bandpass filter outside these bounds to control for spectral bias (see Kosciessa et al 2020)
+    % Bandpass filter outside these bounds to control for spectral bias (see Kosciessa et al., 2020)
     if filtData
         disp('Applying bandpasss-filter to remove spectral bias (please reference Kosciessa et al. (2020).')
 
@@ -87,7 +87,6 @@ for iScale = 1:nScales
         upperBound = (1/iScale).*nf + .05*((1./iScale).*nf);
         lowerBound = (1/(iScale+1)).*nf - .05*((1./(iScale+1)).*nf);
         scales(:,iScale) = [round(lowerBound,3) round(upperBound,3) ];
-
 
         if iScale == 1
             [D,C] = butter(10,lowerBound/nf,'high');   % use Butterworth highpass
@@ -107,7 +106,7 @@ for iScale = 1:nScales
             end
         end
         
-        % FIXME: add this from filedtrip code and move filtering below this
+        % FIXME: add this padding from filedtrip code and move filtering below this
         % padlength = ceil(size(data.trial{1},2)./2); % use half the length of trial 1 as padding (JQK)
         % x_pad = cellfun(@(a) ft_preproc_padding(a, 'mean', padlength), data.trial, 'UniformOutput', false );    % add padding
         % x_pad = cellfun(@transpose, x_pad, 'UniformOutput', false);                                                 % transpose for filtfilt: time x chan

@@ -29,11 +29,15 @@ brown_noise = brown_noise_gen(); % Generate brown noise
 freqs = (0:n-1) / n; % Normalized frequency
 freqs = fftshift(freqs - 0.5); % Center frequencies
 freqs = ifftshift(abs(freqs) + eps); % Avoid division by zero
-spectrum = 1 ./ (freqs.*100); % Apply 1/f^3 scaling
+% spectrum = 1 ./ (freqs.*100); % Apply 1/f^3 scaling
+alpha = 3;
+spectrum = 1 ./ (freqs.^alpha + eps);
 spectrum = spectrum .* (randn(size(spectrum)) + 1i*randn(size(spectrum))); % Add random phases
 spectrum = spectrum / max(abs(spectrum)); % Normalize spectrum
 black_noise = real(ifft(spectrum, 'symmetric')); % Inverse FFTblack_noise = black_noise(:); % ensure column vector
 black_noise = black_noise(:); % ensure column
+
+
 
 % Store Signals
 noise_signals = [white_noise pink_noise brown_noise black_noise];

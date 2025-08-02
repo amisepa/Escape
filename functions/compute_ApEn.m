@@ -11,7 +11,7 @@
 % Cedric Cannard
 
 
-function ae = compute_ae(signal, m, r)
+function ae = compute_ApEn(signal, m, r)
 
 % Defaults
 if ~exist('m', 'var'), m = 2; end
