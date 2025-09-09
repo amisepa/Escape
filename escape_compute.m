@@ -23,15 +23,15 @@
 %   2) Preprocess as necessary (e.g., reference, clean data with ASR, etc.)
 %   3) GUI mode: Tools > Compute entropy
 % or
-%   EEG = asc_compute(EEG);     % launch GUI mode
+%   EEG = escape_compute(EEG);     % launch GUI mode
 % or
-%   EEG = asc_compute(EEG, 'Fuzzy entropy',{'Fpz' 'Cz'},[],[],'Variance');
+%   EEG = escape_compute(EEG, 'Fuzzy entropy',{'Fpz' 'Cz'},[],[],'Variance');
 %                                       % compute fuzzy entropy only on Fpz
 %                                       % and Cz channels with default tau
 %                                       % and m but using variance for the
 %                                       % coarse-graining
 % or
-%   EEG = asc_compute(EEG,'Multiscale fuzzy entropy',[],[],[],[],50,1,[],0);
+%   EEG = escape_compute(EEG,'Multiscale fuzzy entropy',[],[],[],[],50,1,[],0);
 %                                       % compute multiscale fuzzy entropy
 %                                       % on all channels with default
 %                                       % parameters but on 50 time scales,
@@ -41,7 +41,7 @@
 %
 % Copyright - Cedric Cannard, 2022
 
-function [EEG, com] = ascent_compute(EEG, entropyType, chanlist, tau, m, coarseType, nScales, filtData, n, vis)
+function [EEG, com] = escape_compute(EEG, entropyType, chanlist, tau, m, coarseType, nScales, filtData, n, vis)
 
 com = '';
 
@@ -346,7 +346,7 @@ end
 % Visualize
 if vis
     if nchan>1
-        ascent_plot(entropy, EEG.chanlocs(chanIdx), entropyType, scales);
+        escape_plot(entropy, EEG.chanlocs(chanIdx), entropyType, scales);
     else
         disp("Sorry, you need more than 1 EEG channel for visualization.")
     end

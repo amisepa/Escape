@@ -1,4 +1,4 @@
-function asc_plot(entropyData, chanlocs, entropyType, scales)
+function escape_plot(entropyData, chanlocs, entropyType, scales)
 
 % chanlabels = {chanlocs.labels};
 % load("colormap_rufin.mat");

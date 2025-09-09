@@ -1,7 +1,12 @@
-% eegplugin_ascent() - EEGLAB plugin for computing different types of
-% entropy & complexity measures.
+% eegplugin_escape()
 %
-% Copyright (C) - Cedric Cannard, August 2022
+% Entropy and Signal Complexity Analysis Plugin for EEG/MEG (ESCAPE)
+%
+% EEGLAB plugin for computing different types of entropy & complexity measures.
+%
+% Alternative name: Aperiodic Signal Complexity Estimation for Neurophysiological Time series (ASCENT)
+%
+% Copyright (C) - EEGLAB, Cedric Cannard, August 2022-2025
 %
 % This program is free software; you can redistribute it and/or modify
 % it under the terms of the GNU General Public License as published by
@@ -17,17 +22,17 @@
 % along with this program; if not, write to the Free Software
 % Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
-function vers = eegplugin_ascent(fig,try_strings,catch_strings)
+function vers = eegplugin_escape(fig,try_strings,catch_strings)
 
 % Plugin version
 vers = '1.2';
 
 % Add paths to subfolders
-p = fileparts(which('eegplugin_Ascent.m'));
+p = fileparts(which('eegplugin_escape.m'));
 addpath(p);
 addpath(fullfile(p,'functions'))
 
-cmd = [ try_strings.check_data '[EEG,LASTCOM] = ascent_compute(EEG);' ...
+cmd = [ try_strings.check_data '[EEG,LASTCOM] = escape_compute(EEG);' ...
         catch_strings.new_and_hist ];
 
 % create menu

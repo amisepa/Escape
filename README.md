@@ -1,17 +1,21 @@
-# Aperiodic Signal Complexity Estimation for Neurophysiological Time series (ASCENT)
+# Escape EEGLAB plugin: Entropy and Signal Complexity Analysis Plugin for EEG/MEG 
 
-This EEGLAB plugin computes complexity, entropy measures from MEG, EEG, or HRV data. 
+The Escape EEGLAB plugin computes entropy and complexity measures from multidiemnsional M/EEG data (or any physiological time series).
 
 ## Entropy measures available
 
-Uniscale:
-- Approximate / Sample entropy
+Uniscale Entropy:
+- Sample entropy
 - Fuzzy entropy
 
-Multiscale:
+Multiscale Entropy:
 - Multiscale entropy
 - Multiscale fuzzy entropy
 - Refined composite multiscale fuzzy entropy (RCMFE)
+
+Entropy over time (Spectral entropy)
+
+Fractal Dimension
 
 ## Requirements
 
@@ -26,14 +30,3 @@ Go to Wiki page: https://github.com/amisepa/Ascent/wiki
 ## Please cite 
 
 https://psyarxiv.com/xwmyk/
-
-
-## Other references
-
-Costa, Goldberger, and Peng (2005). Multiscale entropy analysis of biological signals. Phys. Rev. E 71, 021906.
-
-Azami and Escudero (2017). Refined Multiscale Fuzzy Entropy based on Standard Deviation for Biomedical Signal Analysis. Medical & Biological Engineering & Computing.
-
-Kosciessa, Kloosterman, & Garrett (2020). Standard multiscale entropy reflects neural dynamics at mismatched temporal scales: What’s signal irregularity got to do with it? PLoS computational biology, 16(5), e1007885.
-
-
