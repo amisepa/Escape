@@ -1,51 +1,93 @@
-function fe = compute_FuzzEn(signal, m, r, n, tau)
-% compute_FuzzEn  Computes Fuzzy Entropy (FuzzEn) of a univariate time series.
+function FuzzEn = compute_FuzzEn(data, varargin)
+% compute_FuzzEn  Computes Fuzzy Entropy (FuzzEn) across multichannel data.
 %
-%   This implementation estimates the irregularity of a signal based on the
-%   fuzzy similarity of embedding vectors, following the definition of Fuzzy
-%   Entropy by Chen et al. (2007) and its multiscale extension by Azami et al. (2017).
+%   FuzzEn = compute_FuzzEn(data, 'm', 2, 'n', 2, 'tau', 1, 'Kernel', 'exponential', 'Parallel', true)
 %
-%   --------
-%   IMPROVEMENTS OVER EXISTING METHODS:
-%   --------
-%   - **Vectorized Pairwise Distance Calculation**: Unlike Azami et al., who used
-%     nested loops or compiled MEX functions, we implement a fast, native MATLAB
-%     method using broadcasting via `permute`, `abs`, and `max` to compute the
-%     Chebyshev (L∞) distances between embedded vectors.
+%   Estimates signal irregularity via fuzzy similarity between embedded vectors.
 %
-%   - **Fallback for Robustness**: If the vectorized approach fails (e.g. due to
-%     memory constraints with large N), the function automatically reverts to a
-%     slower but memory-efficient loop-based method.
+%   Inputs:
+%     - data      : EEG matrix [n_channels x n_samples]
+%     - 'm'       : embedding dimension (default = 2)
+%     - 'n'       : fuzziness exponent (default = 2)
+%     - 'tau'     : embedding delay (default = 1)
+%     - 'Kernel'  : similarity kernel ('exponential' [default] or 'gaussian')
+%     - 'Parallel': true (use parfor) or false (default)
 %
-%   - **No External Dependencies**: Does not require MEX compilation or toolboxes.
+%   Output:
+%     - FuzzEn    : Fuzzy Entropy values [n_channels x 1]
 %
-%   - **Minimal Inputs**: Assumes pre-normalized signal and precomputed `r` for
-%     batch entropy computation across channels, avoiding repeated calculations.
+%   Notes:
+%     - The signal is z-scored per channel internally
+%     - Distance threshold r = 0.2 × std (recommended default)
+%     - A fallback loop is used if vectorized computation fails (e.g., OOM)
 %
-%   --------
-%   INPUTS:
-%     signal : vector (row or column), univariate time series. Must be finite.
-%     m      : scalar, embedding dimension (typically m = 2)
-%     r      : scalar, similarity threshold (e.g. 0.15 * std(signal))
-%     n      : scalar, fuzziness exponent (typically n = 2)
-%     tau    : scalar, embedding delay (typically tau = 1)
+%   References:
+%     - Chen et al., 2007
+%     - Azami et al., 2017
+%     - Estevez-Baez et al., 2021
 %
-%   OUTPUT:
-%     fe     : scalar Fuzzy Entropy value. Returns NaN if the estimate is undefined.
-%
-%   REFERENCES:
-%     - Chen et al., 2007, "Characterization of surface EMG signal based on fuzzy entropy"
-%     - Azami et al., 2017, "Refined composite multiscale fuzzy entropy based on standard deviation"
-%
-%   © Cedric Cannard 2025 – Ascent EEGLAB Plugin (https://github.com/cannard/ascent)
+%   Copyright (C) Cedric Cannard 2025 – Escape EEGLAB Plugin (https://github.com/amisepa/Escape)
 
-signal = signal(:);  % ensure column vector
-if tau > 1
-    signal = signal(1:tau:end);
+% -----------------------------
+% Input parsing
+% -----------------------------
+p = inputParser;
+p.addRequired('data', @(x) isnumeric(x) && ndims(x) == 2);
+p.addParameter('m', 2, @(x) isnumeric(x) && isscalar(x) && x > 0);
+p.addParameter('n', 2, @(x) isnumeric(x) && isscalar(x) && x > 0);
+p.addParameter('tau', 1, @(x) isnumeric(x) && isscalar(x) && x > 0);
+p.addParameter('Kernel', 'exponential', @(x) ismember(lower(x), {'exponential','gaussian'}));
+p.addParameter('Parallel', false, @(x) islogical(x) && isscalar(x));
+p.parse(data, varargin{:});
+
+m          = p.Results.m;
+n_exp      = p.Results.n;
+tau        = p.Results.tau;
+kernelType = lower(p.Results.Kernel);
+useParfor  = p.Results.Parallel;
+
+% Ensure [channels x time]
+if size(data,1) > size(data,2)
+    data = data';
 end
-N = length(signal);
 
+% -----------------------------
+% Preprocessing
+% -----------------------------
+[nchan, ~] = size(data);
+FuzzEn = nan(nchan,1);
+data_z = normalize(data, 2);
+r_vals = 0.2 * std(data_z, 0, 2);  % As recommended in Estevez-Baez et al. (2021)
+
+fprintf('Computing fuzzy entropy (FuzzEn) on %g EEG channels...\n', nchan);
+
+% -----------------------------
+% Main Loop
+% -----------------------------
+if useParfor
+    parfor iChan = 1:nchan
+        FuzzEn(iChan) = compute_FuzzEn_single(data_z(iChan,:), m, r_vals(iChan), n_exp, tau, kernelType);
+        fprintf('FuzzEn for channel %3d/%3d : %6.3f\n', iChan, nchan, FuzzEn(iChan));
+    end
+else
+    progressbar('Computing FuzzEn on all channels (serial mode)')
+    for iChan = 1:nchan
+        FuzzEn(iChan) = compute_FuzzEn_single(data_z(iChan,:), m, r_vals(iChan), n_exp, tau, kernelType);
+        progressbar(iChan / nchan)
+        fprintf('FuzzEn for channel %3d/%3d : %6.3f\n', iChan, nchan, FuzzEn(iChan));
+    end
+end
+
+end
+
+% =========================================================================
+function fe = compute_FuzzEn_single(signal, m, r, n, tau, kernelType)
+% Helper function for per-channel fuzzy entropy
+signal = signal(:);
+if tau > 1, signal = signal(1:tau:end); end
+N = length(signal);
 p = zeros(1, 2);
+
 for k = m:m+1
     M = N - (k - 1)*tau;
     if M <= 1
@@ -53,22 +95,40 @@ for k = m:m+1
         return
     end
 
+    % Embedding
     X = zeros(M, k);
-    for i = 1:k
-        X(:, i) = signal(1 + (i - 1)*tau : N - (k - i)*tau);
+    for j = 1:k
+        X(:, j) = signal(1 + (j - 1)*tau : N - (k - j)*tau);
     end
 
-    % Fast pairwise Chebyshev distances
-    D = zeros(M*(M-1)/2, 1);
-    idx = 1;
-    for i = 1:M-1
-        diff = abs(X(i,:) - X(i+1:M,:));
-        D(idx:idx+M-i-1) = max(diff, [], 2);
-        idx = idx + M - i;
-    end
+    try
+        % Fast chebyshev distance via broadcasting
+        D = max(abs(permute(X, [1 3 2]) - permute(X, [3 1 2])), [], 3);
+        D(1:M+1:end) = NaN;  % Exclude diagonal
 
-    mu = exp(-(D.^n) / r);
-    p(k - m + 1) = mean(mu);
+        switch kernelType
+            case 'exponential'
+                mu = exp(-(D.^n) / r);
+            case 'gaussian'
+                mu = exp(-(D.^2) / (2*r^2));
+        end
+        p(k - m + 1) = nanmean(mu(:));
+
+    catch
+        % Fallback: slower but memory-efficient loop
+        mu = zeros(M, 1);
+        for i = 1:M
+            d = max(abs(X - X(i, :)), [], 2);
+            d(i) = [];
+            switch kernelType
+                case 'exponential'
+                    mu(i) = mean(exp(-(d.^n) / r));
+                case 'gaussian'
+                    mu(i) = mean(exp(-(d.^2) / (2*r^2)));
+            end
+        end
+        p(k - m + 1) = mean(mu);
+    end
 end
 
 if any(p == 0)
@@ -76,70 +136,4 @@ if any(p == 0)
 else
     fe = log(p(1) / p(2));
 end
-
-% signal = signal(:);  % ensure column vector
-% if tau > 1
-%     signal = signal(1:tau:end);  % downsample using delay
-% end
-% N = length(signal);
-% 
-% try
-%     % Vectorized fast method
-%     p = zeros(1, 2);
-%     for k = m:m+1
-%         M = N - (k - 1)*tau;
-%         if M <= 1
-%             fe = NaN;
-%             return
-%         end
-% 
-%         % Build embedding matrix
-%         X = zeros(M, k);
-%         for i = 1:k
-%             X(:, i) = signal(1 + (i - 1)*tau : N - (k - i)*tau);
-%         end
-% 
-%         % Fast Chebyshev distance via broadcasting
-%         D = max(abs(permute(X, [1 3 2]) - permute(X, [3 1 2])), [], 3);
-%         D(1:M+1:end) = NaN;  % exclude diagonal (self-distances)
-%         mu = exp(-(D.^n) / r);
-%         p(k - m + 1) = nanmean(mu(:));
-%     end
-% 
-%     if any(p == 0)
-%         fe = NaN;
-%     else
-%         fe = log(p(1) / p(2));
-%     end
-% 
-% catch
-%     % Fallback method: loop-based Chebyshev distance
-%     p = zeros(1, 2);
-%     for k = m:m+1
-%         M = N - (k - 1)*tau;
-%         if M <= 1
-%             fe = NaN;
-%             return
-%         end
-% 
-%         X = zeros(M, k);
-%         for i = 1:k
-%             X(:, i) = signal(1 + (i - 1)*tau : N - (k - i)*tau);
-%         end
-% 
-%         mu = zeros(M, 1);
-%         for i = 1:M
-%             d = max(abs(X - X(i, :)), [], 2);
-%             d(i) = [];  % exclude self-match
-%             mu(i) = mean(exp(-(d.^n) / r));
-%         end
-%         p(k - m + 1) = mean(mu);
-%     end
-% 
-%     if any(p == 0)
-%         fe = NaN;
-%     else
-%         fe = log(p(1) / p(2));
-%     end
-% end
-% end
+end

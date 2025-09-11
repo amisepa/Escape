@@ -23,33 +23,48 @@ EEG = pop_loadset('filename','sample_data_clean.set','filepath',fullfile(pluginP
 % EEG = pop_select(EEG, 'point', [1 23041]);
 % EEG = ref_infinity(EEG);
 
-% Launch GUI to selec all parameters manually
+%% Sample Entropy (SampEn) via GUI
+
 EEG = escape_compute(EEG);  % or Tools > Compute entropy
 
+%% SampEn via command line with default parameters
+
 % Compute Sample entropy with command line using default parameters
-EEG = escape_compute(EEG,'Sample entropy', {EEG.chanlocs(1:3:end).labels});
-print(gcf, 'SampEn_topo.png','-dpng','-r300');   % 300 dpi .png
+EEG = escape_compute(EEG,'SampEn');
+% print(gcf, 'SampEn_topo.png','-dpng','-r300');   % 300 dpi .png
 
-% If you forgot to plot outputs and want to see, you can call the function
-% like this: 
-escape_plot(EEG.entropy, EEG.chanlocs, 1:EEG.nbchan)
+% outputs can be found in:
+EEG.escape.SampEn.data
+EEG.escape.SampEn.ch
 
-% same but only on Fz and Cz channels and using variance instead of default sd
-EEG = escape_compute(EEG,'Fuzzy entropy',{EEG.chanlocs(1:10:end).labels},[],[],'Variance');
+%% SampEn on just 3 channels of interest 
+
+EEG = escape_compute(EEG,'SampEn', {'Fz' 'Cz' 'Pz'});
+
+
+%% Fuzzy entropy (FuzzEn)
+
+EEG = escape_compute(EEG,'FuzzEn');
+
+% if you change your mind and want to see the plot, you can do so with:
+escape_plot(EEG.escape.SampEn.data, EEG.escape.SampEn.electrode_locations, 'SampEn')
+
+
 
 % Fractal votality on Fz and Cz channels
 EEG = escape_compute(EEG,'Fractal votality',{'Fz' 'Cz'});
 
 % Multiscale entropy with default parameters, on 10 time scales
-EEG = escape_compute(EEG,'Multiscale entropy',[],[],[],[],10,[],[],false);
+EEG = escape_compute(EEG,'MSE',[],[],[],[], 10,[],[],false);
 % EEG = escape_compute(EEG,'Multiscale fuzzy entropy',[],[],[],[],50,[],[],false);
+escape_plot(EEG.escape.MSE.data, EEG.chanlocs, 'MFE', EEG.escape.MSE.scales)
 
 % same but only on channels F3 and F4 (and plotting On)
-EEG = escape_compute(EEG,'Multiscale fuzzy entropy',{'F3' 'F4'},[],[],[],10,[],[],true,false);
+EEG = escape_compute(EEG,'MFE',{'F3' 'F4'},[],[],[],10,[],[],true,false);
 
 % Same but using bandpass filtering at each time scale to control for
 % spectral contamination (and plotting On)
-EEG = escape_compute(EEG,'Multiscale fuzzy entropy',{'F3' 'F4'},[],[],[],10,true,[],true);
+EEG = escape_compute(EEG,'MFE',{'F3' 'F4'},[],[],[],10,true,[],true);
 
 % EEG = escape_compute(EEG);   % GUI mode
 % EEG = escape_compute(EEG,'Approximate entropy');

@@ -37,12 +37,47 @@ if multiscale
     figure('Color','w','InvertHardCopy','off');
     subplot(3, 3, [1 2 4 5 7 8])
     hold on
-    nScales = 1:size(entropyData,2);
-    nChan = 1:size(entropyData,1);
-    imagesc(nScales, nChan, entropyData);
+    nScales = size(entropyData,2);
+    nChan = size(entropyData,1);
+
+    % Main plot
+    imagesc(1:nScales, 1:nChan, entropyData);
+    
+    % y-ticks: EEG channels
+    Yticks = {chanlocs.labels};
+    if nChan > 30
+        newticks = 1:2:length(Yticks);
+    else
+        newticks = 1:length(Yticks);
+    end
+    newticks = unique(newticks);
+    Yticks  = Yticks(newticks);
+    set(gca,'YTick',newticks,'YTickLabel', Yticks,'FontWeight','normal');
+
+    % x-ticks: Time scales
+    Xticks = scales;
+    if nScales > 30
+        newticks = 1:2:length(Xticks);
+    else
+        newticks = 1:length(Xticks);
+    end
+    newticks = unique(newticks);
+    Xticks  = Xticks(newticks);
+    set(gca,'XTick',newticks,'XTickLabel', Xticks,'FontWeight','normal');
+    
 
     % Colormap
-    colormap("hot"); c = colorbar;
+    colormap("parula"); 
+    c = colorbar; c.Label.String = 'Entropy';
+
+    % labels
+    xlabel('Scales'); ylabel('EEG channels');
+    ylabel(c, 'Entropy','FontWeight','bold','FontSize',9)
+    title(sprintf('%s',entropyType))
+
+    % cleanup
+    axis tight
+    set(findall(gcf,'type','axes'),'fontSize',10,'fontweight','bold');
 
     % Clim
     % maxval = max(abs(entropyData(:)));
@@ -54,32 +89,13 @@ if multiscale
     % clim([-maxval maxval])
     % clim([-min(entropyData,[],'all') max(entropyData,[],'all')])
 
-    % y-ticks: EEG channels
-    Yticks = {chanlocs.labels};
-    newticks = 1:2:length(Yticks);
-    newticks = unique(newticks);
-    Yticks  = Yticks(newticks);
-    set(gca,'YTick',newticks,'YTickLabel', Yticks,'FontWeight','normal');
-
-    % x-ticks: Time scales
-    Xticks = scales;
-    newticks = 1:2:length(Xticks);
-    newticks = unique(newticks);
-    Xticks  = Xticks(newticks);
-    set(gca,'XTick',newticks,'XTickLabel', Xticks,'FontWeight','normal');
-
-
-    ylabel(c, 'Entropy','FontWeight','bold','FontSize',9)
-    xlabel('Scales'); ylabel('EEG channels');
-    title(sprintf('%s',entropyType))
-    axis tight
-    set(findall(gcf,'type','axes'),'fontSize',10,'fontweight','bold');
 
     % Peak entropy, channel, and scale
     % peakVal = max(entropyData, [], 'all');
     [peak_value, linear_idx] = max(entropyData(:));  % Find the max value and its linear index
     [peak_channel, peak_scale] = ind2sub(size(entropyData), linear_idx);
-    fprintf('Peak entropy value is %.2f at Scale %g and Channel %s. \n', peak_value, scales(peak_scale), chanlocs(peak_channel).labels);
+    % fprintf('Peak entropy value is %.2f at Scale %g and Channel %s. \n', peak_value, scales(peak_scale), chanlocs(peak_channel).labels);
+    fprintf('Peak entropy value is %.2f at Scale %g (%.2f-%2.f Hz) for Channel %s. \n', peak_value, peak_scale, scales{peak_scale}(1), scales{peak_scale}(2), chanlocs(peak_channel).labels);
 
 
     % time series of peak cluster
@@ -87,7 +103,8 @@ if multiscale
         subplot(3,3,6)
         hold on
         plot(1:length(scales), entropyData(peak_channel,:),'LineWidth',2);
-        color1 = [0, 0.4470, 0.7410];
+        % color1 = [0, 0.4470, 0.7410];
+        axis tight; box on
 
         % chanLabel = chanlocs(peakChan).labels;
         % title(sprintf('Course plot: %s',chanLabel),'FontSize',11,'fontweight','bold')
@@ -103,11 +120,9 @@ if multiscale
 
         % Topography of peak scale
         subplot(3,3,9)
-        topoplot(entropyData, chanlocs, 'emarker', {'.','k',15,1},'electrodes','labels');
-        clim([min(entropyData) max(entropyData)]);
-        c = colorbar;
-        colormap('hot');  % 'hot'
-        c.Label.String = 'Entropy';
+        topoplot(entropyData(:,peak_scale), chanlocs, 'emarker', {'.','k',8,1},'electrodes','on');
+        clim([min(entropyData(:,peak_scale)) max(entropyData(:,peak_scale))]);
+        colormap('parula');  % 'hot' 'parula'
         % c.Label.FontSize = 11;
         % c.Label.FontWeight = 'bold';
 
@@ -121,7 +136,7 @@ else
     % Topography of uniscale entropy
     figure('Color','w','InvertHardCopy','off');
     topoplot(entropyData, chanlocs, 'emarker', {'.','k',15,1},'electrodes','labels');
-    colormap('hot'); % dmap mymap diverging_bgy 'hot' 'bone' 'winter' 'summer' 'viridis'
+    colormap('parula'); % dmap mymap diverging_bgy 'hot' 'bone' 'winter' 'summer' 'viridis'
 
     % clim and colorbar
     % clim([min(entropyData)*.9 max(entropyData)*1.1]);
@@ -218,16 +233,16 @@ end
 
 
 
-% subfunction to display entropy values in the plot where use clicks
-function buttonCallback(tmpdata, coor, label)
-
-% Entropy measures with only one value per channel
-figure('color','w','Position', [500 500 280 210]);
-plot(tmpdata,'linewidth',2,'color','black'); % blue: [0, 0.4470, 0.7410]
-% area(tmpdata,'linewidth',2);
-title(label,'FontSize',14)
-% xticks(2:nScales); xticklabels(join(string(scales(:,2:end)),1)); xtickangle(45)
-% xlim([2 nScales]);
-xlabel('Time scale','FontSize',12,'fontweight','bold');
-ylabel('Entropy','FontSize',12,'fontweight','bold')
+% % subfunction to display entropy values in the plot where use clicks
+% function buttonCallback(tmpdata, coor, label)
+% 
+% % Entropy measures with only one value per channel
+% figure('color','w','Position', [500 500 280 210]);
+% plot(tmpdata,'linewidth',2,'color','black'); % blue: [0, 0.4470, 0.7410]
+% % area(tmpdata,'linewidth',2);
+% title(label,'FontSize',14)
+% % xticks(2:nScales); xticklabels(join(string(scales(:,2:end)),1)); xtickangle(45)
+% % xlim([2 nScales]);
+% xlabel('Time scale','FontSize',12,'fontweight','bold');
+% ylabel('Entropy','FontSize',12,'fontweight','bold')
 

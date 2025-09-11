@@ -2,8 +2,6 @@
 %
 % Entropy and Signal Complexity Analysis Plugin for EEG/MEG (ESCAPE)
 %
-% EEGLAB plugin for computing different types of entropy & complexity measures.
-%
 % Alternative name: Aperiodic Signal Complexity Estimation for Neurophysiological Time series (ASCENT)
 %
 % Copyright (C) - EEGLAB, Cedric Cannard, August 2022-2025
