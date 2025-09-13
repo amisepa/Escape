@@ -115,52 +115,42 @@ end
 end
 
 
-function SampEn = compute_SampEn_single(signal, m, r, tau)
+function SampEn = compute_SampEn_single(signal, m, r, tau) 
 
-signal = signal(:)';
-try N = length(signal);
-    if N <= m + 1, SampEn = NaN;
-        return;
-    end
-    X_m = buffer(signal, m, m-1, 'nodelay')';
-    X_m1 = buffer(signal, m+1, m, 'nodelay')';
-    D_m = pdist(X_m, 'chebychev');
-    D_m1 = pdist(X_m1, 'chebychev');
-    A = mean(D_m < r);
-    B = mean(D_m1 < r);
-    if A > 0 && B > 0
-        SampEn = -log(B / A);
-    else
-        SampEn = NaN;
-    end
-catch
-    warning('Optimized SampEn failed. Trying fallback method.');
-    SampEn = fallback_SampEn(signal, m, r, tau);
-end
-end
+signal = signal(:)'; 
+try N = length(signal); 
+    if N <= m + 1, SampEn = NaN; 
+        return; 
+    end 
+    X_m = buffer(signal, m, m-1, 'nodelay')'; 
+    X_m1 = buffer(signal, m+1, m, 'nodelay')'; 
+    D_m = pdist(X_m, 'chebychev'); 
+    D_m1 = pdist(X_m1, 'chebychev'); 
+    A = mean(D_m < r); 
+    B = mean(D_m1 < r); 
+    if A > 0 && B > 0 
+        SampEn = -log(B / A); 
+    else 
+        SampEn = NaN; 
+    end 
+catch 
+    warning('Optimized SampEn failed. Trying fallback method.'); 
+    SampEn = fallback_SampEn(signal, m, r, tau); 
+end 
+end 
 
 
-function SampEn = fallback_SampEn(signal, m, r, tau)
-if tau > 1
-    signal = signal(1:tau:end);
-end
-n = length(signal);
-p = zeros(1,2);
-sMat = zeros(m+1,n-m);
-for i = 1:m+1 sMat(i,:) = signal(i:n-m+i-1);
-end
-for k = m:m+1
-    count = zeros(1,n-m);
-    tempMat = sMat(1:k,:);
-    for i = 1:n-k
-        dist = max(abs(tempMat(:,i+1:n-m) - repmat(tempMat(:,i),1,n-m-i)));
-        count(i) = sum(dist < r)/(n-m);
-    end
-    p(k-m+1) = sum(count)/(n-m);
-end
-if any(p == 0)
-    SampEn = NaN;
-else
-    SampEn = log(p(1)/p(2));
-end
-end
+function SampEn = fallback_SampEn(signal, m, r, tau) 
+if tau > 1, 
+    signal = signal(1:tau:end); 
+end 
+n = length(signal); 
+p = zeros(1,2); 
+sMat = zeros(m+1,n-m); 
+for i = 1:m+1 sMat(i,:) = signal(i:n-m+i-1); 
+end 
+for k = m:m+1 
+    count = zeros(1,n-m); 
+    tempMat = sMat(1:k,:); 
+    for i = 1:n-k 
+        dist = max(abs(tempMat(:,i+1:n-m) - repmat(tempMat(:,i),1,n-m-i))); count(i) = sum(dist < r)/(n-m); end p(k-m+1) = sum(count)/(n-m); end if any(p == 0) SampEn = NaN; else SampEn = log(p(1)/p(2)); end end

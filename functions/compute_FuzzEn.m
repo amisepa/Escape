@@ -22,9 +22,11 @@ function FuzzEn = compute_FuzzEn(data, varargin)
 %     - A fallback loop is used if vectorized computation fails (e.g., OOM)
 %
 %   References:
-%     - Chen et al., 2007
-%     - Azami et al., 2017
-%     - Estevez-Baez et al., 2021
+%     - Chen, W., et al., (2007). Characterization of surface EMG signal 
+%       based on fuzzy entropy. IEEE Transactions on neural systems and 
+%       rehabilitation engineering, 15(2).
+%     - Azami, H., et al., (2019). Fuzzy entropy metrics for the analysis 
+%       of biomedical signals: Assessment and comparison. IEEE Access, 7.
 %
 %   Copyright (C) Cedric Cannard 2025 – Escape EEGLAB Plugin (https://github.com/amisepa/Escape)
 

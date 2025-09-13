@@ -269,18 +269,27 @@ switch entropyType
             'RejectBursts', true, 'WinFrac', 0.02, 'ZThresh', 6, ...
             'RobustFit', 'ols', ... %  'theilsen' | 'ols'
             'ScaleTrimIQR', true, 'MinJ', [], 'MaxJ', [], ...
-            'Parallel', parallelComp, 'Verbose', true);
+            'Parallel', parallelComp, ...'Verbose', true);
 
     case 'MSE'
 
-          % Kosciessa-style narrowband MSE (default): annuli passbands + filter-skip
-          % [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'nScales', nScales, ...
-          %     'Parallel', parallelComp, 'Verbose', true, 'Progress', true);
+        % FilterMode = 'lowpass' (default) | 'highpass' | 'bandpass' | 'bandstop' | 'none'
+        % CoarseMethod = 'stat' or 'skip' (Kosciessa filt skip)
+        % [entropy, scales, info] = compute_mse(data, fs, ...
+        %     m, .15, tau, coarseType, nScales, filtData, ...
+        %     'FilterMode','lowpass', 'BandMode','annuli', ...   % <- for non-overlapping rings
+        %     'CoarseMethod','stat', ...                          % <- true filt-skip (optional)
+        %     'Parallel', parallelComp, 'Progress',true, 'ProgressStyle','waitbar');
 
-          % no filtering (classic MSE pipeline)
-          [entropy, scales] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
-              'FilterMode', 'none', 'CoarseType', coarseType, 'nScales', nScales, ...
-              'Parallel', parallelComp, 'Progress', true);
+          % 1) Kosciessa-style narrowband MSE (default): annuli passbands + filter-skip
+          [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'nScales', nScales, ...
+              'Parallel', parallelComp, 'Verbose', true);
+
+          % 2) Costa (variance) coarse-graining, lowpass-only scales
+          % [entropy, scales] = compute_mse(EEG, 'Fs', fs, 'CoarseType', 'variance', 'FilterMode', 'lowpass', 'Parallel', parallelComp);
+
+          % 3) Robust median coarse-graining, no filtering (classic MSE pipeline skeleton)
+          % [entropy, scales] = compute_mse(EEG, 'Fs', fs, 'FilterMode', 'none', 'CoarseType', 'median', 'nScales', nScales, 'Parallel', parallelComp);
 
           
         % % Classic mode

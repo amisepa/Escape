@@ -1,332 +1,337 @@
-function [mse, scales, info] = compute_mse(X, fs, m, r, tau, coarseType, nScales, filtData, varargin)
-% COMPUTE_MSE  Multichannel Multiscale Entropy with scale-wise similarity bounds and filter-defined scales.
+function [mse, scales, info] = compute_mse(data, varargin)
+% COMPUTE_MSE  Multichannel Multiscale Entropy aligned with:
+%   • Azami (2017): SampEn uses r = 0.15 * std after z-scoring (PER CHANNEL, PER SCALE).
+%   • Costa (2016/2017): optional 'variance' coarse-graining (volatility MSE).
+%   • Kosciessa (2020): narrowband annuli + filter-skip to avoid broadband confounds.
 %
-% Usage:
-%   [mse, scales, info] = compute_mse(X, fs, m, r, tau, coarseType, nScales, filtData, ...)
+%   [mse, scales, info] = compute_mse(data, 'Fs', fs, 'm', 2, 'Tau', 1, 'nScales', 20, ...)
 %
-% Inputs:
-%   X          - Data matrix [nChan x nSamples]. Each row is one channel.
-%   fs         - Sampling frequency (Hz).
-%   m          - Embedding dimension for sample entropy (commonly m=2).
-%   r          - Similarity criterion (as a RATIO). At each scale, epsilon = r * std(coarse-grained series).
-%   tau        - Time delay for embedding (usually 1).
-%   coarseType - Coarse-graining statistic (case/alias tolerant):
-%                   'Mean' / 'mean' / 0
-%                   'SD' | 'Standard deviation' | 'standard deviation' | 'sigma' | 'std' / 1   (default, recommended)
-%                   'Variance' | 'variance' | 'var' / 2
-%   nScales    - Maximum scale factor to compute.
-%   filtData   - If true, applies zero-phase filtering per scale (LP/HP/BP/BS) to limit spectral bias.
+% REQUIRED
+%   data   [nChan x nSamples] numeric matrix  OR  EEGLAB struct with fields .data, .srate
 %
-% Name-value pairs:
-%   'FilterMode'       : 'lowpass' (default) | 'highpass' | 'bandpass' | 'bandstop' | 'none'
-%   'Band'             : [lo hi] Hz for bandpass/bandstop (clamped to [0, fs/2]).
-%   'RescaleBounds'    : true (default). Use per-scale epsilon = r * std(cg).
-%                        If false, uses global epsilon = r * sd0(ch) (not recommended).
-%   'MinSamplesPerBin' : Minimum coarse-grained LENGTH (bins) to allow per scale (default = max(4, m+1)).
-%   'FiltOrder'        : IIR order per section (default = 6). SOS zero-phase used when available.
-%   'Parallel'         : 'none' (default) | 'scale' | 'channel'. (After vectorization, 'scale' is usually fastest.)
-%   'Verbose'          : true/false (prints band + stats per scale and QC skip reasons).
-%   'Progress'         : true/false (default = true). Show progress (text or waitbar).
-%   'ProgressStyle'    : 'text' (default) | 'waitbar'. Waitbar needs desktop graphics.
-%   'BandMode'         : 'fixed' (default) | 'annuli'  (annuli = non-overlapping rings for bandpass/bandstop)
-%   'CoarseMethod'     : 'stat' (Mean/SD/Variance) | 'skip' (filt-skip after filtering)
+% NAME–VALUE PAIRS (all optional unless marked required)
+%   'Fs'                (required unless data is EEGLAB struct) sampling frequency in Hz
+%   'm'                 embedding dimension for SampEn (default = 2)
+%   'Tau'               time delay for SampEn (default = 1)
+%   'nScales'           number of scales (default = 20; truncated to keep >= MinSamplesPerBin)
+%   'CoarseType'        'sd' (default, Azami) | 'variance' (Costa 2017) | 'mean' | 'median' (robust)
+%   'FilterMode'        'narrowband' (default, annuli) | 'lowpass' | 'highpass' | 'none'
+%   'FilterDesign'      'fir' (default, recommended for narrowbands) | 'iir'
+%   'TransWidth'        FIR transition width in Hz (default auto: max(0.5, 0.15*passband_width))
+%   'FIRMaxOrder'       cap on FIR order (default = 2000)
+%   'IIROrder'          Butterworth section order if 'iir' (default = 6; avoid for narrowbands)
+%   'PadLen'            reflection padding length (samples). Auto: min(max(100, 9*effOrder), floor((T-1)/2))
+%   'MinSamplesPerBin'  minimum coarse bins per scale (default = max(4, m+1))
+%   'Parallel'          logical true/false (default = false). When true, parfor over channels is used.
+%                        (compute_SampEn is always called with 'Parallel','off' to avoid double-parallel)
+%   'Progress'          logical true/false (default = true).
+%                        • Parallel==true  & Progress==true → text only
+%                        • Parallel==false & Progress==true → text + waitbar (fallback to text if headless)
 %
-% Outputs:
-%   mse     - [nChan x nScales_kept] matrix of multiscale sample entropy values (NaN-only scales removed).
-%   scales  - 1 x nScales_kept cell array of [lo hi] Hz per scale (after NaN-only removal).
-%   info    - Struct with runtime options and QC:
-%               .FilterMode, .Band, .RescaleBounds, .MinSamplesPerBin, .FiltOrder, .Parallel, .Verbose, .fs
-%               .cg_len  -> 1 x nScales original coarse-grained lengths (bins) per scale
-%               .elapsed -> elapsed time (seconds)
+% IMPORTANT
+%   • Do NOT pass r here. compute_SampEn must z-score internally and use r = 0.15*std(data_z) PER CHANNEL.
 %
-% Integrity notes:
-%   • SampEn uses absolute epsilon **per scale** (epsilon = r * std(coarse series)), preventing variance-driven bias.
-%   • Zero-phase SOS Butterworth with reflection padding minimizes phase and edge artifacts.
-%   • Filtering is vectorized across channels per scale; helpers are subfunctions (parfor-safe).
+% OUTPUTS
+%   mse     [nChan x nScales_kept] multiscale sample entropy values
+%   scales  1 x nScales_kept cell array with [lo hi] Hz per scale
+%   info    struct: options, coarse-bin counts (cg_len), elapsed time, fs
+%
+% EXAMPLES
+%   % A) EEGLAB struct input (Fs auto from EEG.srate), parallel over channels
+%   [mse, scales] = compute_mse(EEG, 'nScales', 18, 'Parallel', true, 'Progress', true);
+%
+%   % B) Numeric matrix input + explicit Fs, variance coarse, lowpass
+%   [mse, scales] = compute_mse(EEG.data, 'Fs', EEG.srate, 'CoarseType','variance', 'FilterMode','lowpass');
+%
+%   % C) Robust median coarse-graining, no filtering
+%   [mse, scales] = compute_mse(EEG, 'FilterMode','none', 'CoarseType','median', 'nScales', 25);
 %
 % -------------------------------------------------------------------------
 % Copyright (C) 2025
-% EEGLAB Escape plugin
-% Author: Cedric Cannard
-% GNU GPL v2 or later.
+% EEGLAB Escape plugin — Author: Cedric Cannard
+% License: GNU GPL v2 or later
 % -------------------------------------------------------------------------
-
-% -------- Options --------
-p = inputParser;
-p.addParameter('FilterMode','lowpass');                % 'lowpass'|'highpass'|'bandpass'|'bandstop'|'none'
-p.addParameter('Band',[8 12]);                         % used for bandpass/bandstop
-p.addParameter('RescaleBounds', true);                 % epsilon per scale = r * std(cg)
-p.addParameter('MinSamplesPerBin', max(4,m+1));        % minimum # coarse bins per scale
-p.addParameter('FiltOrder', 6);                        % Butterworth order per section
-p.addParameter('Parallel', 'none');                    % 'none'|'scale'|'channel'
-p.addParameter('Verbose', false);
-p.addParameter('Progress', true);
-p.addParameter('ProgressStyle', 'text');               % 'text'|'waitbar'
-p.addParameter('BandMode','fixed');                    % 'fixed'|'annuli'
-p.addParameter('CoarseMethod','stat');                 % 'stat'|'skip'
-p.parse(varargin{:});
-o = p.Results;
 
 tStart = tic;
 
-[nChan, nSamp] = size(X);
-nf = fs/2;
+% -------- Parse options (accept Fs later, may come from EEG struct)
+p = inputParser;
+p.addParameter('Fs', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x) && x>0));
+p.addParameter('m', 2, @(x) isnumeric(x) && isscalar(x) && x>=1);
+p.addParameter('Tau', 1, @(x) isnumeric(x) && isscalar(x) && x>=1);
+p.addParameter('nScales', 20, @(x) isnumeric(x) && isscalar(x) && x>=1);
+p.addParameter('CoarseType', 'sd');
+p.addParameter('FilterMode', 'narrowband');    % Kosciessa default
+p.addParameter('FilterDesign', 'fir');         % FIR default for narrowbands
+p.addParameter('TransWidth', []);              % Hz; auto if empty
+p.addParameter('FIRMaxOrder', 2000);
+p.addParameter('IIROrder', 6);
+p.addParameter('PadLen', []);                  % auto if empty
+p.addParameter('MinSamplesPerBin', []);
+p.addParameter('Parallel', false, @(x) islogical(x) && isscalar(x));
+p.addParameter('Progress', true,  @(x) islogical(x) && isscalar(x));
+p.parse(varargin{:});
+o = p.Results;
 
-% -------- CoarseType parsing (default SD) --------
-ct = 'sd';
-if nargin >= 6 && ~isempty(coarseType)
-    if ischar(coarseType) || isstring(coarseType)
-        t = lower(char(coarseType)); t = strtrim(t); t = regexprep(t,'[^a-z]','');
-        if any(strcmp(t,{'mean','mu'})), ct='mean';
-        elseif any(strcmp(t,{'sd','sigma','standarddeviation','std'})), ct='sd';
-        elseif any(strcmp(t,{'variance','var','sigma2'})), ct='variance';
-        else, warning('Unknown coarseType "%s"; defaulting to SD.', t); ct='sd';
-        end
-    elseif isnumeric(coarseType) && isscalar(coarseType)
-        switch round(coarseType), case 0, ct='mean'; case 1, ct='sd'; case 2, ct='variance';
-            otherwise, warning('Unknown numeric coarseType=%g; defaulting to SD.', coarseType); ct='sd';
-        end
+% -------- Accept EEGLAB struct or numeric
+[dat, fs_from_struct] = coerce_data_matrix(data);
+if isempty(o.Fs)
+    if isempty(fs_from_struct)
+        error('Fs must be provided (numeric data) or available as EEG.srate (struct input).');
     else
-        warning('Unrecognized coarseType; defaulting to SD.'); ct='sd';
+        o.Fs = fs_from_struct;
     end
 end
+[nChan, nSamp] = size(dat);
+if isempty(o.MinSamplesPerBin), o.MinSamplesPerBin = max(4, o.m+1); end
 
-% -------- Sanitize nScales (must be finite integer ≥1); guard by MinSamplesPerBin --------
-if ischar(nScales) || isstring(nScales), nScales = str2double(nScales); end
-if ~isscalar(nScales) || ~isfinite(nScales), error('nScales must be a finite scalar.'); end
-nScales = floor(double(nScales));
-maxScales = floor(nSamp / o.MinSamplesPerBin);
-if nScales > maxScales
-    warning('Reducing nScales from %d to %d (>= %d bins/scale).', nScales, maxScales, o.MinSamplesPerBin);
-    nScales = maxScales;
+% -------- CoarseType token (supports robust 'median')
+ct = parse_coarse_type(o.CoarseType);
+
+% -------- Scales & bands (simple Kosciessa mapping)
+% narrowband annuli: for scale s, passband = [nf/(s+1), nf/s]
+nf = o.Fs/2;
+makeBand = @(s,mode) switch_lower_mode(mode, nf, s);
+
+% ---- Sanitize scales
+S = o.nScales;
+if ischar(S) || isstring(S), S = str2double(S); end
+if ~isscalar(S) || ~isfinite(S) || S < 1, S = 1; end
+S = floor(S);
+
+maxS = floor(nSamp / o.MinSamplesPerBin);
+if S > maxS
+    warning('Reducing nScales from %d to %d to keep >=%d coarse bins.', S, maxS, o.MinSamplesPerBin);
+    S = maxS;
 end
-nScales = max(1,nScales);
-if strcmpi(o.Parallel,'scale') && nScales <= 1, o.Parallel = 'none'; end
 
-% -------- Warn if skip without filtering --------
-if strcmpi(o.CoarseMethod,'skip') && ~filtData
-    warning('CoarseMethod="skip" without filtering is not recommended; enable filtering for true filt-skip behavior.');
+% If still zero (e.g., tiny nSamp), fallback to S=1 and disable filtering
+if S < 1
+    warning(['All requested scales would have < %d coarse bins with current settings. ' ...
+             'Falling back to nScales=1 with FilterMode=''none'' (statistical coarse-grain). ' ...
+             'Consider: longer epochs, fewer scales, FilterMode=''lowpass'' or lower MinSamplesPerBin.'], ...
+             o.MinSamplesPerBin);
+    S = 1;
+    o.FilterMode = 'none';
 end
 
-% -------- Z-score per channel (retain sd0 for optional global epsilon) --------
-X = X - mean(X,2);
-sd0 = std(X,0,2); sd0(sd0==0)=1;
-X = X ./ sd0;
-
-% -------- Per-scale bands (store exact edges) --------
-scales = cell(1,nScales);
-for s = 1:nScales
-    lo = 0; hi = nf;
-    switch lower(o.FilterMode)
-        case 'lowpass'
-            lo = 0;          hi = nf/s;          % classic LP cascade (overlap by design)
-        case 'highpass'
-            lo = nf/(s+1);   hi = nf;
-        case 'bandpass'
-            if strcmpi(o.BandMode,'annuli')
-                lo = nf/(s+1); hi = nf/s;        % adjacent non-overlapping rings
-            else
-                lo = max(0,o.Band(1)); hi = min(nf,o.Band(2));
-            end
-        case 'bandstop'
-            if strcmpi(o.BandMode,'annuli')
-                lo = nf/(s+1); hi = nf/s;        % stop that ring
-            else
-                lo = max(0,o.Band(1)); hi = min(nf,o.Band(2));
-            end
-        case 'none'
-            lo = 0; hi = nf;
-        otherwise
-            error('Unknown FilterMode: %s', o.FilterMode);
-    end
-    lo = max(0, min(lo, nf));
-    hi = max(0, min(hi, nf));
-    if ~(hi > lo)
-        warning('Scale %d yields invalid band [%.6g %.6g] Hz; setting NaNs.', s, lo, hi);
-        scales{s} = [NaN NaN]; continue
-    end
-    scales{s} = [lo, hi];
-    if o.Verbose
-        if strcmpi(o.FilterMode,'bandstop')
-            fprintf('Scale %2d: STOP [%.3f %.3f] Hz\n', s, lo, hi);
+% Precompute bands
+scales = cell(1,S);
+for s = 1:S
+    bw = makeBand(s, o.FilterMode);
+    scales{s} = (bw(2) > bw(1)) * bw + ~(bw(2) > bw(1)) * [NaN NaN]; % keep NaN if invalid
+    if o.Progress
+        if strcmpi(o.FilterMode,'none')
+            fprintf('Scale %2d: FULL [0 %.3f] Hz\n', s, nf);
         else
-            fprintf('Scale %2d: PASS [%.3f %.3f] Hz\n', s, lo, hi);
+            fprintf('Scale %2d: PASS [%.3f %.3f] Hz\n', s, scales{s}(1), scales{s}(2));
         end
     end
 end
 
-% -------- Outputs --------
-mse    = nan(nChan, nScales);
-cg_len = zeros(1, nScales);
+% -------- Pre-allocate & progress
+mse    = nan(nChan, S);
+cg_len = zeros(1, S);
 
-% -------- Progress setup --------
-useProgress = o.Progress;
-useWB = useProgress && strcmpi(o.ProgressStyle,'waitbar') && usejava('desktop');
+useWB = (o.Progress && ~o.Parallel && usejava('desktop'));
 hWB = [];
 if useWB
-    try, hWB = waitbar(0,'Multiscale Entropy: initializing...','Name','compute_mse'); catch, hWB=[]; end
+    try, hWB = waitbar(0,'Computing MSE...','Name','compute_mse'); catch, hWB=[]; end
 end
-if useProgress && ~useWB
-    fprintf('MSE: %d scales | mode=%s | coarse=%s | parallel=%s\n', nScales, o.FilterMode, ct, o.Parallel);
+if o.Progress
+    fprintf('MSE: %d scales | Filter=%s/%s | Coarse=%s | Parallel(ch)=%d\n', ...
+        S, o.FilterMode, o.FilterDesign, ct, o.Parallel);
 end
-progressCount = 0; updateEvery = 1;
-fmtMsg = @(c) sprintf('MSE scales: %d/%d (%.0f%%) | elapsed %s', c, nScales, 100*c/nScales, duration(0,0,toc(tStart),'format','mm:ss'));
+tick = @(k) sprintf('Scales %d/%d (%.0f%%)', k, S, 100*k/max(1,S));
 
-% DataQueue for parfor progress (callback is on client only)
-dq = [];
-if useProgress && strcmpi(o.Parallel,'scale') && (exist('parallel.pool.DataQueue','class')==8)
-    dq = parallel.pool.DataQueue;
-    afterEach(dq, @(~) localUpdateProgress());
-end
-    function localUpdateProgress()
-        progressCount = progressCount + 1;
-        if mod(progressCount,updateEvery)==0
-            if useWB && ~isempty(hWB) && isvalid(hWB)
-                try, waitbar(progressCount/nScales, hWB, fmtMsg(progressCount)); end
-            else
-                fprintf('%s\n', fmtMsg(progressCount));
-            end
+% -------- Scales loop (serial), channels (parfor if requested)
+for s=1:S
+    % 1) Filtering (FIR default; zero-phase with reflection padding)
+    Y = dat;
+    band = scales{s};
+    if ~strcmpi(o.FilterMode,'none') && ~any(isnan(band))
+        switch lower(o.FilterDesign)
+            case 'fir'
+                Y = zp_fir(Y, o.Fs, band(1), band(2), nf, o.TransWidth, o.FIRMaxOrder, o.PadLen);
+            otherwise
+                Y = zp_iir(Y, band(1), band(2), nf, o.IIROrder, o.PadLen);
         end
     end
 
-% -------- Execution --------
-switch lower(o.Parallel)
-    case 'scale'
-        MSE_s_local  = cell(1,nScales);
-        cg_len_local = zeros(1,nScales);
-        parfor s = 1:nScales
-            lo = scales{s}(1); hi = scales{s}(2);
-            Y = X;
-            if filtData && ~(lo==0 && hi==nf)
-                Y = mat_zpfilter(Y, lo, hi, nf, o.FiltOrder, o.FilterMode);
-            end
-            [CG, nBins] = coarsegrain_mat(Y, s, ct, o.CoarseMethod);
-            cg_len_s = nBins;
-            mse_s = nan(nChan,1);
-            if nBins >= o.MinSamplesPerBin && nBins > m+1
-                for ch = 1:nChan
-                    cg = CG(ch,:);
-                    if o.RescaleBounds
-                        eps_scale = r * std(cg);
-                        if eps_scale > 0, mse_s(ch) = compute_SampEn(cg, m, eps_scale, tau); else, mse_s(ch)=NaN; end
-                    else
-                        eps_global = r * sd0(ch);
-                        mse_s(ch) = compute_SampEn(cg, m, eps_global, tau);
-                    end
-                end
-            end
-            MSE_s_local{s}  = mse_s;
-            cg_len_local(s) = cg_len_s;
-            if ~isempty(dq), send(dq, 1); end
-        end
-        for s = 1:nScales, mse(:,s) = MSE_s_local{s}; end
-        cg_len = cg_len_local;
+    % 2) Coarse-grain: filter-skip when filtering; else statistical coarse-grain
+    if ~strcmpi(o.FilterMode,'none') && ~any(isnan(band))
+        idx = 1:s:floor(size(Y,2)/s)*s;
+        CG  = Y(:, idx);
+        nBins = size(CG,2);
+    else
+        [CG, nBins] = coarsegrain_stat(Y, s, ct);
+    end
+    cg_len(s) = nBins;
 
-    case 'channel'
-        MSE_ch_local = cell(1,nChan);
-        CGL_ch_local = cell(1,nChan);
-        for ch = 1:nChan
-            mse_ch    = nan(1,nScales);
-            cg_len_ch = zeros(1,nScales);
-            for s = 1:nScales
-                lo = scales{s}(1); hi = scales{s}(2);
-                y = X(ch,:);
-                if filtData && ~(lo==0 && hi==nf)
-                    y = mat_zpfilter(y, lo, hi, nf, o.FiltOrder, o.FilterMode);
-                end
-                [cg_row, nBins] = coarsegrain_mat(y, s, ct, o.CoarseMethod);
-                cg_len_ch(s) = nBins;
-                if nBins >= o.MinSamplesPerBin && nBins > m+1
-                    if o.RescaleBounds
-                        eps_scale = r * std(cg_row);
-                        if eps_scale > 0, mse_ch(s) = compute_SampEn(cg_row, m, eps_scale, tau); else, mse_ch(s)=NaN; end
-                    else
-                        eps_global = r * sd0(ch);
-                        mse_ch(s) = compute_SampEn(cg_row, m, eps_global, tau);
-                    end
-                else
-                    if o.Verbose
-                        fprintf('Scale %2d skipped (ch %d): nBins=%d (< Min=%d or <= m+1=%d)\n', s, ch, nBins, o.MinSamplesPerBin, m+1);
-                    end
-                end
+    % 3) SampEn per channel (SampEn: z-score internally, r=0.15*std, Parallel='off')
+    if nBins >= max(4, o.m+1)
+        mse_s = nan(nChan,1);
+        if o.Parallel && ~isempty(ver('parallel'))
+            if o.Progress, fprintf('  [par] computing SampEn over %d channel(s) @ scale %d\n', nChan, s); end
+            parfor ch=1:nChan
+                cg = CG(ch,:);
+                mse_s(ch) = compute_SampEn(cg, 'm', o.m, 'tau', o.Tau, 'Parallel', false, 'Progress', false);
             end
-            MSE_ch_local{ch} = mse_ch;
-            CGL_ch_local{ch} = cg_len_ch;
-            if useProgress, localUpdateProgress(); end
+        else
+            if o.Progress, fprintf('  [ser] computing SampEn over %d channel(s) @ scale %d\n', nChan, s); end
+            for ch=1:nChan
+                cg = CG(ch,:);
+                mse_s(ch) = compute_SampEn(cg, 'm', o.m, 'tau', o.Tau, 'Parallel', false, 'Progress', false);
+            end
         end
-        for ch=1:nChan, mse(ch,:) = MSE_ch_local{ch}; end
-        cg_len = max(cg_len, max(cat(1,CGL_ch_local{:}),[],1)); % QC summary across chans
+        mse(:,s) = mse_s;
+    else
+        if o.Progress
+            fprintf('  [skip] scale %d: nBins=%d (< Min=%d)\n', s, nBins, o.MinSamplesPerBin);
+        end
+    end
 
-    otherwise % 'none'
-        for s = 1:nScales
-            if useProgress && ~useWB, fprintf(' - scale %d/%d\n', s, nScales); end
-            lo = scales{s}(1); hi = scales{s}(2);
-            Y = X;
-            if filtData && ~(lo==0 && hi==nf)
-                Y = mat_zpfilter(Y, lo, hi, nf, o.FiltOrder, o.FilterMode);
-            end
-            [CG, nBins] = coarsegrain_mat(Y, s, ct, o.CoarseMethod);
-            cg_len(s) = nBins;
-            if nBins >= o.MinSamplesPerBin && nBins > m+1
-                for ch = 1:nChan
-                    cg = CG(ch,:);
-                    if o.RescaleBounds
-                        eps_scale = r * std(cg);
-                        if eps_scale > 0, mse(ch,s) = compute_SampEn(cg, m, eps_scale, tau); else, mse(ch,s)=NaN; end
-                    else
-                        eps_global = r * sd0(ch);
-                        mse(ch,s) = compute_SampEn(cg, m, eps_global, tau);
-                    end
-                end
-            else
-                if o.Verbose
-                    fprintf('Scale %2d skipped: nBins=%d (< Min=%d or <= m+1=%d)\n', s, nBins, o.MinSamplesPerBin, m+1);
-                end
-            end
-            if useProgress, localUpdateProgress(); end
-        end
+    if useWB && ~isempty(hWB) && isvalid(hWB)
+        try, waitbar(s/S, hWB, tick(s)); end
+    elseif o.Progress
+        fprintf(' - scale %d/%d\n', s, S);
+    end
 end
 
-% -------- Remove NaN-only scales consistently --------
+% -------- Drop NaN-only scales (but never return 0 columns)
 nanScale = all(isnan(mse),1);
-if any(nanScale)
+if any(nanScale) && sum(~nanScale) >= 1
     mse(:,nanScale) = [];
     scales(nanScale) = [];
     cg_len(nanScale) = [];
+elseif all(nanScale) && ~isempty(nanScale)
+    keep = find(nanScale, 1, 'first');
+    drop = setdiff(1:numel(nanScale), keep);
+    mse(:,drop) = [];
+    scales(drop) = [];
+    cg_len(drop) = [];
 end
 
-% -------- Close waitbar --------
-if ~isempty(hWB) && isvalid(hWB), try, close(hWB); end, end
-
-% -------- Info out --------
-info = struct('FilterMode',o.FilterMode,'Band',o.Band,'RescaleBounds',o.RescaleBounds, ...
-              'MinSamplesPerBin',o.MinSamplesPerBin,'FiltOrder',o.FiltOrder, ...
-              'Parallel',o.Parallel,'Verbose',o.Verbose,'fs',fs, ...
-              'cg_len', cg_len, 'elapsed', toc(tStart));
-
+% -------- Close waitbar & info
+if ~isempty(hWB) && isvalid(hWB)
+    try, close(hWB); end
 end
+info = struct('FilterMode',o.FilterMode,'FilterDesign',o.FilterDesign,'TransWidth',o.TransWidth, ...
+              'FIRMaxOrder',o.FIRMaxOrder,'IIROrder',o.IIROrder,'PadLen',o.PadLen, ...
+              'MinSamplesPerBin',o.MinSamplesPerBin,'Parallel',o.Parallel, ...
+              'fs',o.Fs,'cg_len',cg_len,'elapsed',toc(tStart));
 
-% ======================= LOCAL SUBFUNCTIONS =======================
+end % === compute_mse ===
 
-function Y = mat_zpfilter(Y, lo, hi, nf, filtOrder, filterMode)
-% Zero-phase IIR Butterworth (SOS if available) + reflection padding.
-if strcmpi(filterMode,'none'), return; end
-switch lower(filterMode)
-    case 'lowpass',   Wn = hi/nf;       ftype='low';
-    case 'highpass',  Wn = lo/nf;       ftype='high';
-    case 'bandpass',  Wn = [lo hi]/nf;  ftype='bandpass';
-    case 'bandstop',  Wn = [lo hi]/nf;  ftype='stop';
-    otherwise, return;
-end
-if any(Wn<=0) || any(Wn>=1) || (numel(Wn)==2 && Wn(1)>=Wn(2)), return; end
-useSOS = exist('sosfiltfilt','file')==2;
-if useSOS
-    [z,p,k] = butter(filtOrder, Wn, ftype); sos = zp2sos(z,p,k);
+
+% ======================= LOCAL HELPERS =======================
+
+function [X, fs] = coerce_data_matrix(data)
+% Accept numeric [nChan x nSamples] or EEGLAB EEG struct.
+fs = [];
+if isnumeric(data)
+    X = double(data);
+elseif isstruct(data) && isfield(data,'data')
+    X = double(data.data);
+    if isfield(data,'srate') && ~isempty(data.srate), fs = double(data.srate); end
 else
-    [b,a] = butter(filtOrder, Wn, ftype);
+    error('First argument must be numeric [nChan x nSamples] or EEGLAB EEG struct with field .data');
 end
+if ~isreal(X)
+    warning('Data is complex; using real part.'); X = real(X);
+end
+end
+
+function ct = parse_coarse_type(token)
+% Parse coarse-type; support numeric aliases and robust 'median'.
+ct = 'sd';
+if isempty(token), return; end
+if isnumeric(token)
+    switch round(token)
+        case 0, ct='mean';
+        case 1, ct='sd';
+        case 2, ct='variance';
+        otherwise, ct='sd';
+    end
+else
+    t = lower(regexprep(strtrim(char(token)),'[^a-z]',''));
+    if any(strcmp(t,{'sd','sigma','std','standarddeviation'})), ct='sd';
+    elseif any(strcmp(t,{'variance','var','sigma2'})),         ct='variance';
+    elseif any(strcmp(t,{'mean','avg','average','mu'})),       ct='mean';
+    elseif any(strcmp(t,{'median','med'})),                    ct='median';
+    else, ct='sd';
+    end
+end
+end
+
+function band = switch_lower_mode(mode, nf, s)
+% Map scale s -> [lo hi] Hz band per FilterMode (Kosciessa-simple).
+mode = lower(mode);
+switch mode
+    case 'narrowband'  % annuli
+        band = [max(0, nf/(s+1)), min(nf, nf/s)];
+    case 'lowpass'
+        band = [0, min(nf, nf/s)];
+    case 'highpass'
+        band = [max(0, nf/(s+1)), nf];
+    otherwise % 'none'
+        band = [0, nf];
+end
+end
+
+function Y = zp_fir(Y, fs, lo, hi, nf, transHz, maxOrder, padLen)
+% Zero-phase linear-phase FIR (Hamming), reflection padded.
+% Auto order from transition width; capped by maxOrder for speed.
+if hi <= lo || lo < 0 || hi > nf, return; end
+pbw = max(hi-lo, eps);
+if isempty(transHz)
+    transHz = max(0.5, 0.15*pbw); % >=0.5 Hz or 15% of passband width
+end
+tw = max(transHz, fs/size(Y,2)); % guard: at least ~1 bin in transition
+ord = min(maxOrder, max(10, ceil(3.3*fs/tw)));  % Hamming ~60 dB
+
+% Build FIR
+if lo<=0 && hi>0
+    Wn = hi/(fs/2); b  = fir1(ord, Wn, 'low',  hamming(ord+1), 'scale');
+elseif hi>=nf && lo>0
+    Wn = lo/(fs/2); b  = fir1(ord, Wn, 'high', hamming(ord+1), 'scale');
+else
+    Wn = [lo hi]/(fs/2); b = fir1(ord, Wn, 'bandpass', hamming(ord+1), 'scale');
+end
+
+% Reflection padding + zero-phase filtering
 T = size(Y,2);
-pad = min(max(60, 3*filtOrder*3), floor((T-1)/2));
+if isempty(padLen)
+    pad = min(max(100, 9*ord), floor((T-1)/2));
+else
+    pad = min(padLen, floor((T-1)/2));
+end
+if pad>0
+    Ypad = [fliplr(Y(:,1:pad)) , Y , fliplr(Y(:,end-pad+1:end))];
+    Ypad = filtfilt(b, 1, Ypad.').';
+    Y = Ypad(:, pad+1:end-pad);
+else
+    Y = filtfilt(b, 1, Y.').';
+end
+end
+
+function Y = zp_iir(Y, lo, hi, nf, ord, padLen)
+% Zero-phase IIR Butterworth (SOS if available) with reflection padding
+if hi <= lo || lo < 0 || lo > nf, return; end %#ok<*ISMT>
+Wn = [lo hi]/nf; ftype='bandpass';
+if lo<=0 && hi>0,  Wn = hi/nf;  ftype='low'; end
+if hi>=nf && lo>0, Wn = lo/nf;  ftype='high'; end
+if any(Wn<=0) || any(Wn>=1), return; end
+useSOS = exist('sosfiltfilt','file')==2;
+if useSOS, [z,p,k] = butter(ord, Wn, ftype); sos = zp2sos(z,p,k);
+else,      [b,a]    = butter(ord, Wn, ftype); end
+T = size(Y,2);
+if isempty(padLen)
+    effOrder = ord*2;
+    pad = min(max(100, 9*effOrder), floor((T-1)/2));
+else
+    pad = min(padLen, floor((T-1)/2));
+end
 if pad>0
     Ypad = [fliplr(Y(:,1:pad)) , Y , fliplr(Y(:,end-pad+1:end))];
     if useSOS, Ypad = sosfiltfilt(sos, Ypad.').'; else, Ypad = filtfilt(b,a, Ypad.').'; end
@@ -336,33 +341,24 @@ else
 end
 end
 
-function [CG, nBins] = coarsegrain_mat(Y, s, ct, coarseMethod)
-% Coarse-grain along time by factor s. Y: [nChan x nSamples] or [1 x nSamples].
-if nargin < 4 || isempty(coarseMethod), coarseMethod = 'stat'; end
-if isrow(Y), Y = Y(:)'; end
+function [CG, nBins] = coarsegrain_stat(Y, s, ct)
+% Statistical coarse-graining by factor s; supports 'sd'|'variance'|'mean'|'median'
 nChan = size(Y,1);
 nFull = floor(size(Y,2)/s)*s;
 if nFull == 0, CG = nan(nChan,0); nBins = 0; return; end
-
-if strcmpi(coarseMethod,'skip')
-    % Kosciessa filt-skip: take every s-th sample after filtering
-    CG = Y(:, 1:s:nFull);
-    nBins = size(CG,2);
-    return
-end
-
-% Azami-style statistical coarse-grain
 nBins = nFull / s;
 Z = reshape(Y(:,1:nFull), nChan, s, nBins);
 switch ct
-    case 'mean'
-        CG = squeeze(mean(Z, 2, 'omitnan'));
     case 'sd'
         CG = squeeze(std(Z, 0, 2, 'omitnan'));
     case 'variance'
         CG = squeeze(var(Z, 0, 2, 'omitnan'));
+    case 'mean'
+        CG = squeeze(mean(Z, 2, 'omitnan'));
+    case 'median'
+        CG = squeeze(median(Z, 2, 'omitnan'));
     otherwise
-        error('Unknown coarseType token after parsing: %s', ct);
+        CG = squeeze(std(Z, 0, 2, 'omitnan')); % safe fallback
 end
 if isvector(CG), CG = CG(:)'; end
 end

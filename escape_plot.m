@@ -1,3 +1,6 @@
+%   Copyright (C) Cedric Cannard 2025 – Escape EEGLAB Plugin (https://github.com/amisepa/Escape)
+
+
 function escape_plot(entropyData, chanlocs, entropyType, scales)
 
 % chanlabels = {chanlocs.labels};

@@ -37,9 +37,9 @@ EEG = escape_compute(EEG,'SampEn');
 EEG.escape.SampEn.data
 EEG.escape.SampEn.ch
 
-%% SampEn on just 3 channels of interest 
+%% SampEn on just 2 channels of interest 
 
-EEG = escape_compute(EEG,'SampEn', {'Fz' 'Cz' 'Pz'});
+EEG = escape_compute(EEG,'SampEn', {'Fz' 'Cz'});
 
 
 %% Fuzzy entropy (FuzzEn)
@@ -49,14 +49,24 @@ EEG = escape_compute(EEG,'FuzzEn');
 % if you change your mind and want to see the plot, you can do so with:
 escape_plot(EEG.escape.SampEn.data, EEG.escape.SampEn.electrode_locations, 'SampEn')
 
+%% Extrema-Segmented Entropy (ExSEnt)
+
+EEG = escape_compute(EEG,'ExSEnt');
+
+%% Fractal dimension (votality)
+
+EEG = escape_compute(EEG,'FracDim');
 
 
-% Fractal votality on Fz and Cz channels
-EEG = escape_compute(EEG,'Fractal votality',{'Fz' 'Cz'});
+%% Multiscale entropy (MSE)
 
 % Multiscale entropy with default parameters, on 10 time scales
-EEG = escape_compute(EEG,'MSE',[],[],[],[], 10,[],[],false);
-% EEG = escape_compute(EEG,'Multiscale fuzzy entropy',[],[],[],[],50,[],[],false);
+EEG = escape_compute(EEG,'MSE',[],[],[], 'sd', 5);
+
+
+%% Multiscale fuzzy entropy (MFE)
+
+% EEG = escape_compute(EEG,'MFE',[],[],[],[],50,[],[],false);
 escape_plot(EEG.escape.MSE.data, EEG.chanlocs, 'MFE', EEG.escape.MSE.scales)
 
 % same but only on channels F3 and F4 (and plotting On)
