@@ -29,7 +29,7 @@
 %                                       % and m but using variance for the
 %                                       % coarse-graining
 % or
-%   EEG = escape_compute(EEG,'MFE',[],[],[],[],50,1,[],0);
+%   EEG = escape_compute(EEG,'MFE',[],[],[],[],50,true,[],0);
 %                                       % compute multiscale fuzzy entropy
 %                                       % on all channels with default
 %                                       % parameters but on 50 time scales,
@@ -39,7 +39,7 @@
 %
 % Copyright - Cedric Cannard, 2022
 
-function [EEG, com] = escape_compute(EEG, entropyType, chanlist, tau, m, coarseType, nScales, filtData, n, vis)
+function [EEG, com] = escape_compute(EEG, entropyType, chanlist, tau, m, coarseType, nScales, filtData, n, vis, parallelComp)
 
 com = '';
 
@@ -175,6 +175,9 @@ if contains(lower(entropyType), {'mse' 'mfe' 'rcmfe'})
     end
     if ~exist('filtData','var') || isempty(filtData)
         filtData = false;
+        disp("Filtering each scale factor (from Kosciessa et al. 2017) set to: OFF.")
+    else
+        disp("Filtering each scale factor (from Kosciessa et al. 2017) set to: ON.")
     end
 else
     coarseType = [];
@@ -193,7 +196,7 @@ end
 % r = .15; % Hardcode r to .15 because data are later normalized to have SD of 1 (Azami approach)
 
 % % parallel computing
-parallelComp = false;   % request parallel mode (to add to GUI and command line options)
+% parallelComp = false;   % request parallel mode (to add to GUI and command line options)
 p = gcp('nocreate');   % get current pool (if any)
 if parallelComp
     if isempty(p)
@@ -244,7 +247,9 @@ switch entropyType
 
     % Sample Entropy (SampEn)
     case 'SampEn'
-        entropy = compute_SampEn(data, 'm', m, 'tau', tau, 'Parallel', parallelComp);
+        % entropy = compute_SampEn(data, 'm', m, 'tau', tau, 'Parallel', parallelComp);
+        entropy = compute_SampEn(data, 'm', m, 'r', .15, 'parallel', parallelComp);
+
         
     % Fuzzy Entropy (FuzzEn)
     case 'FuzzEn'
@@ -269,77 +274,78 @@ switch entropyType
             'RejectBursts', true, 'WinFrac', 0.02, 'ZThresh', 6, ...
             'RobustFit', 'ols', ... %  'theilsen' | 'ols'
             'ScaleTrimIQR', true, 'MinJ', [], 'MaxJ', [], ...
-            'Parallel', parallelComp, ...'Verbose', true);
+            'Parallel', parallelComp);
 
     case 'MSE'
 
-        % FilterMode = 'lowpass' (default) | 'highpass' | 'bandpass' | 'bandstop' | 'none'
-        % CoarseMethod = 'stat' or 'skip' (Kosciessa filt skip)
-        % [entropy, scales, info] = compute_mse(data, fs, ...
-        %     m, .15, tau, coarseType, nScales, filtData, ...
-        %     'FilterMode','lowpass', 'BandMode','annuli', ...   % <- for non-overlapping rings
-        %     'CoarseMethod','stat', ...                          % <- true filt-skip (optional)
-        %     'Parallel', parallelComp, 'Progress',true, 'ProgressStyle','waitbar');
+        % % Origianl Costa 2002 MSE
+        % parfor iChan = 1:nChan
+        %     fprintf('channel %g/%g\n',iChan, nChan);
+        %     % [ entropy(iChan,:), A, B ] = mse(data(iChan,:));
+        %     entropy(iChan,:) = compute_mse_costa(data(iChan,:), m, .15, tau, 'mean', nScales, filtData, fs)
+        % end
+        % if ~filtData
+        %     scales = arrayfun(@(x) {num2str(x)}, 1:nScales);
+        % end
+        
+      % Enhanced classic MSE
+      % [entropy, scales] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
+      %     'FilterMode', 'none', 'CoarseType', coarseType, 'nScales', nScales, ...
+      %     'Parallel', parallelComp, 'Progress', true);           
+         
+         if filtData 
+             % Kosciessa-style narrowband MSE (default): annuli passbands + filter-skip
+             filter_mode = 'narrowband';  %  'narrowband' (default, annuli) | 'lowpass' | 'highpass' | 'none'
+         else
+             filter_mode = 'none';
+         end
 
-          % 1) Kosciessa-style narrowband MSE (default): annuli passbands + filter-skip
-          [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'nScales', nScales, ...
-              'Parallel', parallelComp, 'Verbose', true);
+         [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
+              'FilterMode', filter_mode, 'CoarseType', coarseType, 'nScales', nScales, ...
+              'Parallel', parallelComp, 'Progress', true);
 
-          % 2) Costa (variance) coarse-graining, lowpass-only scales
-          % [entropy, scales] = compute_mse(EEG, 'Fs', fs, 'CoarseType', 'variance', 'FilterMode', 'lowpass', 'Parallel', parallelComp);
-
-          % 3) Robust median coarse-graining, no filtering (classic MSE pipeline skeleton)
-          % [entropy, scales] = compute_mse(EEG, 'Fs', fs, 'FilterMode', 'none', 'CoarseType', 'median', 'nScales', nScales, 'Parallel', parallelComp);
+          % % Time-resolved version
+          % [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
+          %      'FilterMode', filter_mode, 'CoarseType', coarseType, 'nScales', nScales, ...
+          %     'TimeWin', 2, 'TimeStep', 1, ...
+          %     'Parallel', parallelComp, 'Progress', true);
 
           
-        % % Classic mode
-        % [entropy, scales, info] = compute_mse(data, fs, ...
-        %     m, r, tau, coarseType, nScales, true, ...
-        %     'FilterMode','lowpass', 'CoarseMethod','stat', ...
-        %     'Parallel','none', 'Verbose',true, 'Progress',true, 'ProgressStyle','waitbar');
-
-
     case 'MFE'
-        % disp('Computing multiscale fuzzy entropy...')
-        % progressbar('Channels')
-        % % t1 = tic;
-        % for iChan = 1:nChan
-        %     fprintf('Channel %d: \n', iChan)
-            [entropy(iChan,:), scales] = compute_mfe(data, ...
-                m, r, tau, coarseType, nScales, filtData, EEG.srate, n);
-            % progressbar(iChan/nChan)
-            % % entropy(iChan,1:length(enttmp)) = enttmp;
-        % end
-        % toc(t1)
+        % [entropy, scales] = compute_mfe(data, ...
+        %     m, r, tau, coarseType, nScales, filtData, EEG.srate, n);
 
-        % % Remove NaN scales
-        % idx = isnan(entropy(1,:));
-        % entropy(:,idx) = [];
-        % scales(idx) = [];
+         filter_mode = 'narrowband';  %  'narrowband' (default, annuli) or 'none'
+         [entropy, scales, info] = compute_mfe(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
+              'FilterMode', filter_mode, 'CoarseType', coarseType, 'nScales', nScales, ...
+              'Parallel', parallelComp, 'Progress', true);
+
+          % % Time-resovled version
+          % [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
+          %      'FilterMode', filter_mode, 'CoarseType', coarseType, 'nScales', nScales, ...
+          %     'TimeWin', 2, 'TimeStep', 1, ...
+          %     'Parallel', parallelComp, 'Progress', true);
+
 
     case 'RCMFE'
-        % disp('Computing multiscale fuzzy entropy...')
-        % progressbar('Channels')
-        % for iChan = 1:nChan
-            % fprintf('Channel %d: \n', iChan)
-            % signal = EEG.data(chanIdx(iChan),:);
-            [entropy(iChan,:), scales] = compute_rcmfe(signal, ...
-                m, r, tau, coarseType, nScales, filtData, EEG.srate, n);
-            % [entropy(iChan,:), scales] = compute_rcmfe(EEG.data(iChan,:),m,r,tau,coarseType,nScales,filtData,EEG.srate);
-            % progressbar(iChan/nChan)
-        % end
-
-    % Spectral entropy (SpecEn) - Over time
-    case 'SpecEn' 
-        disp('Computing spectral entropy...')
-        progressbar('Channels')
-        parfor iChan = 1:nchan
-            % fprintf('Channel %d \n', iChan)
-            [entropy(iChan,:),te] = pentropy( zscore(EEG.data(chanIdx(iChan),:)), EEG.srate);
-
-            fprintf('   %s: %6.3f \n', EEG.chanlocs(iChan).labels, entropy(iChan,:))
-            progressbar(iChan/nchan)
+        parfor iChan = 1:nChan
+            fprintf('channel %g/%g\n',iChan, nChan);
+            entropy(iChan,:) = compute_rcmfe(data(iChan,:), ...
+                m, .15, tau, coarseType, nScales, fs, n, false);
         end
+        scales = arrayfun(@(x) {num2str(x)}, 1:nScales);
+
+    % % Spectral entropy (SpecEn) - Over time
+    % case 'SpecEn' 
+    %     disp('Computing spectral entropy...')
+    %     progressbar('Channels')
+    %     parfor iChan = 1:nchan
+    %         % fprintf('Channel %d \n', iChan)
+    %         [entropy(iChan,:),te] = pentropy( zscore(EEG.data(chanIdx(iChan),:)), EEG.srate);
+    % 
+    %         fprintf('   %s: %6.3f \n', EEG.chanlocs(iChan).labels, entropy(iChan,:))
+    %         progressbar(iChan/nchan)
+    %     end
 
     otherwise
         error('Unknown entropy type. Please select one of the options (see help get_entropy).')
@@ -357,7 +363,7 @@ end
 %     end
 % end
 
-% Visualize
+% Visualize / Plot
 if vis
     if nChan>1
         if strcmpi(entropyType, 'ExSEnt')
@@ -365,7 +371,11 @@ if vis
             escape_plot(HA, chanlocs, 'SampEn of amplitudes', scales);
             escape_plot(HDA, chanlocs, 'Joint SampEn of durations & amplitudes', scales);
         else
+            % % Standard plot
             escape_plot(entropy, chanlocs, entropyType, scales);
+
+            % Time-resolved plot
+            % escape_plot(info.mse_time, EEG.chanlocs, 'MSE (time-resolved, 2s/1s)', scales, info.time_sec);
         end
     else
         disp("Sorry, you need more than 1 EEG channel for visualization.")

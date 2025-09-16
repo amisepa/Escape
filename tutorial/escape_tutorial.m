@@ -15,13 +15,11 @@ eeglab; close;
 % or donwload the github repo and unzip it in the EEGLAB plugins folder
 
 % Load provided sample EEG data from the tutorial directory 
-% (several minutes of mind wandering, 64-channel Biosemi):
+% (2 minutes of resting state eyes-closed, 64-channel Biosemi):
 pluginPath = fileparts(which('eegplugin_escape.m'));
 cd(pluginPath)
-EEG = pop_loadset('filename','sample_data_clean.set','filepath',fullfile(pluginPath,'tutorial'));
-% EEG = pop_resample(EEG, 128); % downsample to 128 Hz to increase speed
-% EEG = pop_select(EEG, 'point', [1 23041]);
-% EEG = ref_infinity(EEG);
+EEG = pop_loadset('filename','sample_data.set','filepath',fullfile(pluginPath,'tutorial'));
+
 
 %% Sample Entropy (SampEn) via GUI
 
@@ -30,44 +28,67 @@ EEG = escape_compute(EEG);  % or Tools > Compute entropy
 %% SampEn via command line with default parameters
 
 % Compute Sample entropy with command line using default parameters
-EEG = escape_compute(EEG,'SampEn');
+EEG = escape_compute(EEG, 'measure', 'SampEn');
 % print(gcf, 'SampEn_topo.png','-dpng','-r300');   % 300 dpi .png
 
-% outputs can be found in:
-EEG.escape.SampEn.data
-EEG.escape.SampEn.ch
+% % Outputs can be found in:
+% EEG.escape.SampEn
 
-%% SampEn on just 2 channels of interest 
-
-EEG = escape_compute(EEG,'SampEn', {'Fz' 'Cz'});
-
+% Fine-tuning parameters (for demonstration only)
+[EEG, com] = escape_compute(EEG, 'measure', 'SampEn', ...
+    'chanlist', 'Cz Fz F3 F4 Pz Oz O1 O2', ...   % channel selection
+    'tau', 2, ...
+    'm', 3, ...
+    'r', .5, ...
+    'parallel', false, ...
+    'progress', true, ...
+    'vis', true);
 
 %% Fuzzy entropy (FuzzEn)
 
-EEG = escape_compute(EEG,'FuzzEn');
+% default parameters
+EEG = escape_compute(EEG,'measure', 'FuzzEn');
 
-% if you change your mind and want to see the plot, you can do so with:
-escape_plot(EEG.escape.SampEn.data, EEG.escape.SampEn.electrode_locations, 'SampEn')
+% Fine-tuning parameters (for demonstration only)
+EEG = escape_compute(EEG,'measure', 'FuzzEn', ...
+    'n', 2, ...
+    'kernel','gaussian', ...
+    'blocksize', 128);
+
 
 %% Extrema-Segmented Entropy (ExSEnt)
 
-EEG = escape_compute(EEG,'ExSEnt');
+EEG = escape_compute(EEG,'measure', 'ExSEnt', 'r', .20);
 
 %% Fractal dimension (votality)
 
-EEG = escape_compute(EEG,'FracDim');
+EEG = escape_compute(EEG,'measure', 'FracDim');
 
 
 %% Multiscale entropy (MSE)
 
 % Multiscale entropy with default parameters, on 10 time scales
-EEG = escape_compute(EEG,'MSE',[],[],[], 'sd', 5);
+coarsing = 'median';  % 'median' 'mean' 'sd' 'variance'
+EEG = escape_compute(EEG,'MSE',[],[],[], coarsing, 12, true);
 
 
 %% Multiscale fuzzy entropy (MFE)
 
-% EEG = escape_compute(EEG,'MFE',[],[],[],[],50,[],[],false);
-escape_plot(EEG.escape.MSE.data, EEG.chanlocs, 'MFE', EEG.escape.MSE.scales)
+coarsing = 'median';  % 'median' 'mean' 'sd' 'variance'
+EEG = escape_compute(EEG,'MFE',[],[],[], coarsing, 10, false);
+
+
+%% Multiscale fuzzy entropy (MFE)
+
+coarsing = 'median';  % 'median' 'mean' 'sd' 'variance'
+EEG = escape_compute(EEG,'RCMFE',[],[],[], coarsing, 10, false);
+
+
+
+
+%% 
+% % if you change your mind and want to see the plot, you can do so with:
+% escape_plot(EEG.escape.SampEn.data, EEG.escape.SampEn.electrode_locations, 'SampEn')
 
 % same but only on channels F3 and F4 (and plotting On)
 EEG = escape_compute(EEG,'MFE',{'F3' 'F4'},[],[],[],10,[],[],true,false);

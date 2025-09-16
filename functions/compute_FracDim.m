@@ -1,48 +1,43 @@
 function [D, SD, info] = compute_FracDim(data, varargin)
 % Fractal dimension via box counting with outlier-aware options.
 %
-%   [D, SD, info] = compute_FracDim(data, 'Parallel', true, 'RejectBursts', true, ...)
+%   [D, SD, info] = compute_FracDim(data, ...
+%       'RejectBursts', true, 'WinFrac', 0.02, 'ZThresh', 6, ...
+%       'RobustFit', 'theilsen', 'ScaleTrimIQR', true, ...
+%       'MinBoxesPerCol', 1, 'MinJ', [], 'MaxJ', [], ...
+%       'Parallel', true, 'Progress', true, 'MinScales', 6)
 %
-%   Inputs
-%     - data          : matrix [n_channels x n_samples]. If a vector, treated as 1 channel.
-%     Name-Value pairs:
-%       'RejectBursts'   : true|false, sliding MAD z-score burst rejection (default true)
-%       'WinFrac'        : window length for burst detection as fraction of [0,1] x-axis (default 0.02)
-%       'ZThresh'        : MAD z threshold to flag bursts (default 6)
-%       'RobustFit'      : 'theilsen' | 'ols' (default 'theilsen')
-%                          Note: if 'huber' is provided, it is mapped to 'theilsen' for portability.
-%       'ScaleTrimIQR'   : true|false, trim scale-wise slope outliers by IQR rule (default true)
-%       'MinBoxesPerCol' : minimum vertical boxes to accept per column (default 1)
-%       'MinJ'           : minimum dyadic level to consider, [] for auto (default [])
-%       'MaxJ'           : maximum dyadic level to consider, [] for auto (default [])
-%       'Parallel'       : true|false, enable parfor over channels (default false)
-%       'Verbose'        : true|false, print per-channel info and progress (default true)
-%       'MinScales'      : minimum number of valid scales required to use the robust fit (default 6)
+% Inputs
+%   data            : [n_channels x n_samples] (vector → 1 channel)
+%   Name-Value pairs:
+%     'RejectBursts'   : true|false, MAD z-score burst rejection (default true)
+%     'WinFrac'        : window length for burst detection as fraction of x-axis (default 0.02)
+%     'ZThresh'        : MAD z threshold (default 6)
+%     'RobustFit'      : 'theilsen' | 'ols'  (default 'theilsen')
+%                        Note: 'huber' is mapped to 'theilsen' for portability.
+%     'ScaleTrimIQR'   : true|false, trim scale-wise slope outliers by IQR (default true)
+%     'MinBoxesPerCol' : minimum vertical boxes per x-column (default 1)
+%     'MinJ'           : minimum dyadic level (default [], auto)
+%     'MaxJ'           : maximum dyadic level (default [], auto)
+%     'Parallel'       : true|false, parfor over channels (default true)
+%     'Progress'       : true|false, show progress (default true)
+%                        • Parallel==true  & Progress==true → text-only (parfor-safe)
+%                        • Parallel==false & Progress==true → text + waitbar (fallback to text if headless)
+%     'MinScales'      : minimum #valid scales for robust fit (default 6)
 %
-%   Outputs
-%     - D   : fractal dimension per channel [n_channels x 1]
-%     - SD  : standard error of slope per channel [n_channels x 1]
-%     - info: struct with diagnostics
-%         .r, .n, .validScales, .usedX, .usedY, .cleanMask, .Jvec per channel (cell arrays)
-%         .fitMethod, .rejectBursts, .nUsedScales, .flags, .params
+% Outputs
+%   D   : fractal dimension per channel [n_channels x 1]
+%   SD  : standard error of slope per channel [n_channels x 1]
+%   info: diagnostics (fields per-channel: .r, .n, .validScales, .usedX, .usedY,
+%         .cleanMask, .Jvec, .fitMethod, .nUsedScales, .flags; plus .params)
 %
-%   Rationale and references
-%     Short, high-power bursts can distort scale-based estimates even if they occupy a
-%     tiny fraction of the recording. Pre-removal of such outliers and robust fitting of
-%     scaling relationships stabilizes the slope estimate. Methodological guidance taken
-%     from wavelet-leader multifractal outlier handling and robust estimation ideas:
-%       Dumeur, M., Palva, J. M., & Ciuciu, P. (2025). Outlier detection and removal in
-%       multifractal analysis of electrophysiological brain signals. EURASIP Journal on
-%       Advances in Signal Processing, 2025(1), 35.
-%
-%   Copyright (C) Cedric Cannard 2025
-%   Escape EEGLAB Plugin  https://github.com/amisepa/Escape
-%
-%   This code adapts general recommendations about detecting and downweighting outlier
-%   segments before scale-exponent fitting. It does not implement the paper's full
-%   p-leader segmentation, but mirrors its intent for box counting.
+% -------------------------------------------------------------------------
+% Copyright (C) 2025
+% EEGLAB Escape Plugin — Author: Cedric Cannard
+% License: GNU GPL v2 or later
+% -------------------------------------------------------------------------
 
-% Parse inputs
+% ---------- Parse inputs ----------
 p = inputParser;
 p.addRequired('data', @(x) isnumeric(x) && ismatrix(x));
 p.addParameter('RejectBursts', true, @(x) islogical(x) || isnumeric(x));
@@ -53,8 +48,8 @@ p.addParameter('ScaleTrimIQR', true, @(x) islogical(x) || isnumeric(x));
 p.addParameter('MinBoxesPerCol', 1, @(x) isnumeric(x) && isscalar(x) && x >= 1);
 p.addParameter('MinJ', [], @(x) isempty(x) || (isscalar(x) && x >= 1));
 p.addParameter('MaxJ', [], @(x) isempty(x) || (isscalar(x) && x >= 1));
-p.addParameter('Parallel', false, @(x) islogical(x) || isnumeric(x));
-p.addParameter('Verbose',  true,  @(x) islogical(x) || isnumeric(x));
+p.addParameter('Parallel', true, @(x) islogical(x) && isscalar(x));
+p.addParameter('Progress', true, @(x) islogical(x) && isscalar(x));
 p.addParameter('MinScales', 6, @(x) isnumeric(x) && isscalar(x) && x >= 2);
 p.parse(data, varargin{:});
 opts = p.Results;
@@ -62,13 +57,13 @@ opts = p.Results;
 % Map 'huber' to 'theilsen' for portability
 if strcmpi(opts.RobustFit,'huber')
     warning('compute_FracDim:HuberNotImplemented', ...
-        'Huber robust fit not provided in this portable build. Using Theil-Sen instead.');
+        'Huber robust fit not provided in this portable build. Using Theil–Sen instead.');
     opts.RobustFit = 'theilsen';
 end
 
-% Ensure [n_channels x n_samples]
+% ---------- Shape ----------
 if size(data,1) > size(data,2)
-    data = data.';  % transpose to [n_channels x n_samples]
+    data = data.';  % -> [n_channels x n_samples]
 end
 [nchan, ~] = size(data);
 D  = nan(nchan,1);
@@ -83,18 +78,26 @@ info.usedX       = cell(nchan,1);
 info.usedY       = cell(nchan,1);
 info.cleanMask   = cell(nchan,1);
 info.Jvec        = cell(nchan,1);
-info.fitMethod   = cell(nchan,1);  % per-channel actual method used
+info.fitMethod   = cell(nchan,1);
 info.rejectBursts= repmat(logical(opts.RejectBursts), nchan, 1);
 info.nUsedScales = zeros(nchan,1);
 info.flags       = cell(nchan,1);
 info.params      = opts;
 
-if opts.Verbose
-    fprintf('Fractal volatility via box counting on %d channels...\n', nchan);
+% ---------- Progress header ----------
+if opts.Progress
+    if opts.Parallel
+        fprintf('FracDim: %d channel(s) | robust=%s | parallel=on (text only)\n', ...
+            nchan, lower(string(opts.RobustFit)));
+        fprintf('Progress:\n');
+    else
+        fprintf('FracDim: %d channel(s) | robust=%s | parallel=off (text + waitbar)\n', ...
+            nchan, lower(string(opts.RobustFit)));
+    end
 end
 
-% Iterate channels, parallel or serial
-if opts.Parallel
+% ---------- Iterate channels ----------
+if opts.Parallel && ~isempty(ver('parallel'))
     % Collectors for parfor
     r_all     = cell(nchan,1);
     n_all     = cell(nchan,1);
@@ -120,8 +123,8 @@ if opts.Parallel
         nscale_all(ch) = chInfo.nUsedScales;
         flags_all{ch}  = chInfo.flags;
 
-        if opts.Verbose
-            fprintf('Channel %3d/%3d  D=%6.4f  SE=%6.4f\n', ch, nchan, D(ch), SD(ch));
+        if opts.Progress
+            fprintf('  ch %3d/%3d: D=%7.5f  SE=%7.5f\n', ch, nchan, D(ch), SD(ch));
         end
     end
 
@@ -138,8 +141,10 @@ if opts.Parallel
     info.flags        = flags_all;
 
 else
-    if exist('progressbar','file')
-        progressbar('computing fractal dimension/volatility (serial)')
+    useWB = opts.Progress && usejava('desktop');
+    hWB = [];
+    if useWB
+        try hWB = waitbar(0,'Computing Fractal Dimension...','Name','compute_FracDim'); catch, hWB = []; end
     end
     for ch = 1:nchan
         [D(ch), SD(ch), chInfo] = compute_fractal_volatility_single(data(ch,:), opts);
@@ -154,23 +159,23 @@ else
         info.nUsedScales(ch) = chInfo.nUsedScales;
         info.flags{ch}       = chInfo.flags;
 
-        if opts.Verbose
-            fprintf('Channel %3d/%3d  D=%6.4f  SE=%6.4f\n', ch, nchan, D(ch), SD(ch));
-        end
-        if exist('progressbar','file')
-            progressbar(ch / nchan)
+        if opts.Progress
+            fprintf('  ch %3d/%3d: D=%7.5f  SE=%7.5f\n', ch, nchan, D(ch), SD(ch));
+            if ~isempty(hWB) && isvalid(hWB)
+                try, waitbar(ch/nchan, hWB, sprintf('Computing Fractal Dimension... (%d/%d)', ch, nchan)); end
+            end
         end
     end
+    if ~isempty(hWB) && isvalid(hWB), try, close(hWB); end, end
 end
 end
 
-
-%% Single-channel worker
+%% ===================== Single-channel worker ===================== %%
 function [dimension, standard_dev, out] = compute_fractal_volatility_single(sig, opts)
 sig = sig(:).';           % row
 N   = numel(sig);
 
-% Build [x,y] embedded in unit square
+% Build [x,y] in unit square
 x = (1:N).';
 y = sig(:);
 
@@ -182,7 +187,7 @@ if any(bad), y(bad) = []; x(bad) = []; N = numel(y); end
 x = (x - min(x)) / max(eps, (max(x)-min(x)));
 y = (y - min(y)) / max(eps, (max(y)-min(y)));
 
-% Guard constant signals (no vertical extent)
+% Guard constant signals
 if isempty(y) || max(y) == min(y)
     dimension = NaN; standard_dev = NaN;
     out = struct('r',[],'n',[],'validScales',[],'usedX',[],'usedY',[], ...
@@ -191,7 +196,7 @@ if isempty(y) || max(y) == min(y)
     return
 end
 
-% Optional burst rejection using sliding MAD z-score on y
+% Optional burst rejection via sliding MAD z-score
 maskGood = true(N,1);
 if opts.RejectBursts
     win = max(5, round(opts.WinFrac * N));
@@ -206,11 +211,10 @@ end
 xg = x(maskGood); yg = y(maskGood);
 [xg, idx] = sort(xg, 'ascend'); yg = yg(idx);
 if numel(xg) < 10
-    % fall back to raw if cleaning removed too much
-    xg = x; yg = y; maskGood = true(N,1);
+    xg = x; yg = y; maskGood = true(N,1);  % fallback if too much removed
 end
 
-% Determine dyadic scales based on min spacing of x
+% Dyadic scale selection
 dx = diff(xg); dx(dx<=0) = [];
 if isempty(dx), dx = 1/N; end
 minwidth = floor(abs(log2(max(eps, min(dx))))) - 1;
@@ -220,7 +224,7 @@ Jmin = Jmin_auto; if ~isempty(opts.MinJ), Jmin = max(1, opts.MinJ); end
 Jmax = Jmax_auto; if ~isempty(opts.MaxJ), Jmax = min(opts.MaxJ, Jmax_auto); end
 Jvec = Jmin:Jmax;
 
-% Box counting over columns for each scale
+% Box counting per scale
 n = zeros(numel(Jvec),1);
 r = zeros(numel(Jvec),1);
 for ii = 1:numel(Jvec)
@@ -230,7 +234,7 @@ for ii = 1:numel(Jvec)
     r(ii) = width;
 end
 
-% Assemble log arrays and drop degenerate scales
+% Valid scales
 valid = n > 0 & r > 0 & isfinite(n) & isfinite(r);
 rv = r(valid); nv = n(valid);
 if numel(rv) < 2
@@ -241,7 +245,7 @@ if numel(rv) < 2
     return
 end
 
-% Optional trimming of scale-wise slopes by IQR
+% Optional scale-trim via IQR on local slopes
 if opts.ScaleTrimIQR && numel(rv) >= 5
     s = -gradient(log(nv)) ./ gradient(log(rv));
     IQRs = iqr(s);
@@ -253,18 +257,18 @@ end
 
 x2 = log(rv); y2 = log(nv);
 
-% Standardize and ensure column vectors
+% Standardize for robust fit stability
 mx = mean(x2); sx = std(x2); if sx==0, sx = 1; end
 my = mean(y2); sy = std(y2); if sy==0, sy = 1; end
 xz = (x2 - mx) / sx;  xz = xz(:);
 yz = (y2 - my) / sy;  yz = yz(:);
 
-% Decide method
+% Choose fit method
 forceOLS = strcmpi(opts.RobustFit,'ols');
 smallN   = numel(xz) < opts.MinScales || rank([ones(numel(xz),1) xz]) < 2;
 
 if forceOLS || smallN
-    % OLS on original variables
+    % OLS on (x2,y2)
     X = [ones(size(x2)) x2];
     beta = X \ y2;
     yhat = X*beta;
@@ -276,7 +280,7 @@ if forceOLS || smallN
     slope_se = se(2);
     methodUsed = 'ols';
 else
-    % Theil–Sen on standardized variables, then back-transform
+    % Theil–Sen on standardized vars; SE from OLS on standardized residuals
     m = theil_sen(xz, yz);
     b = median(yz - m*xz);
     slope    = m * sy / sx;
@@ -310,9 +314,9 @@ out.flags = struct( ...
     'constant',  false);
 end
 
-%% Helpers
+%% ===================== Helpers ===================== %%
 function boxcount = count_boxes_in_columns(xg, yg, width, minBoxes)
-% Count vertical boxes needed inside each x column of width.
+% Count vertical boxes needed inside each x column of given width.
 nCols = max(1, 2^round(-log2(width)));
 col = min(floor(xg / width) + 1, nCols);
 boxcount = 0;
@@ -337,7 +341,7 @@ function m = theil_sen(x, y)
 x = x(:); y = y(:);
 N = numel(x);
 if N < 2, m = 0; return, end
-K = N*(N-1)/2;
+K = N*(N-1)/2; %#ok<NASGU> 
 sl = zeros(K,1);
 t = 0;
 for i = 1:N-1

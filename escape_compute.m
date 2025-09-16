@@ -1,3 +1,5 @@
+function [EEG, com] = escape_compute(EEG, varargin)
+
 %% EEGLAB plugin to compute entropy-based measures on M/EEG data.
 % Also works on other types of biosignals (e.g., ECG, HRV).
 % Founded on code developed by Costa et al. (2002) and Azami and Escudero
@@ -5,14 +7,14 @@
 %
 % INPUTS:
 %   EEG - EEG structure in EEGLAB format
-%   entropyType - 'SampEn', 'FuzzEn', 'MSE', 'MFE', 'RCMFE (default)'
+%   measure - 'SampEn', 'FuzzEn', 'MSE', 'MFE', 'RCMFE (default)'
 %   chanlist - EEG channels of interest (empty will select all channels)
 %   tau - time lag (default = 1)
 %   m - embedding dimension (default = 2)
-%   coarseType - coarse graining method for multiscale entropies: 'Mean',
+%   coarsing - coarse graining method for multiscale entropies: 'Mean',
 %                 'Standard deviation' (default), or 'Variance'
-%   nScales - number of scale factors (default = 30)
-%   filtData - apply band pass filters to each time scale to control for
+%   num_scales - number of scale factors (default = 30)
+%   filt_scales - apply band pass filters to each time scale to control for
 %       broadband spectral bias (see Kosciessa et al. 2020 for more detail).
 %   vis - visualize entropy outputs (1, default) or not (0)
 %
@@ -29,7 +31,7 @@
 %                                       % and m but using variance for the
 %                                       % coarse-graining
 % or
-%   EEG = escape_compute(EEG,'MFE',[],[],[],[],50,1,[],0);
+%   EEG = escape_compute(EEG,'MFE',[],[],[],[],50,true,[],0);
 %                                       % compute multiscale fuzzy entropy
 %                                       % on all channels with default
 %                                       % parameters but on 50 time scales,
@@ -39,118 +41,113 @@
 %
 % Copyright - Cedric Cannard, 2022
 
-function [EEG, com] = escape_compute(EEG, entropyType, chanlist, tau, m, coarseType, nScales, filtData, n, vis)
 
-com = '';
-
-tstart =  tic;
+tstart = tic;
 
 % add path to subfolders
 plugin_path = fileparts(which('eegplugin_escape.m'));
 addpath(genpath(plugin_path));
 
-% Basic checks and warnings
-if nargin < 1
-    help pop_entropy; return;
-end
-if isempty(EEG.data)
-    error('Empty dataset.');
-end
-if isempty(EEG.chanlocs(1).labels)
-    error('No channel labels.');
-end
-% if exist(vis,'var') && ~isempty(vis)
+% Basic checks and warnings (unchanged)
+if nargin < 1, help pop_entropy; return; end
+if isempty(EEG.data), error('Empty dataset.'); end
+if isempty(EEG.chanlocs(1).labels), error('No channel labels.'); end
 if ~isfield(EEG.chanlocs, 'X') || isempty(EEG.chanlocs(1).X)
-    error("Electrode locations are required. " + ...
-        "Go to 'Edit > Channel locations' and import the appropriate coordinates for your montage");
+    error("Electrode locations are required. Go to 'Edit > Channel locations' and import coordinates");
 end
-% end
 if isempty(EEG.ref)
-    warning(['EEG data not referenced! Referencing is highly recommended ' ...
-        '(e.g., average- reference)!']);
+    warning('EEG data not referenced! Referencing is highly recommended (e.g., average-reference)!');
 end
 
-% Continuous/epoched data
+% Continuous/epoched data (unchanged)
 if length(size(EEG.data)) == 2
     continuous = true;
 else
     continuous = false; %%%%%%%%%%%%% ADD OPTION TO RUN ON EPOCHED DATA %%%%%%%%%
 end
 
-%% 1st GUI to select channels and type of entropy
+measure     = [];
+chanlist    = [];
+tau         = [];
+m           = [];
+coarsing    = [];
+num_scales  = [];
+filt_scales = [];
+n           = [];
+vis         = true;
+paraComp    = false;
 
-if nargin == 1
-    eTypes = {'Sample entropy' 'Fuzzy entropy' 'Multiscale entropy' 'Multiscale fuzzy entropy' 'Refined composite multiscale fuzzy entropy'};
-    uigeom = { [.5 .9] .5 [.5 .4 .2] .5 [.5 .1] .5 [.5 .1] .5 .5};
-    uilist = {
-        {'style' 'text' 'string' 'Entropy type:' 'fontweight' 'bold'} ...
-        {'style' 'popupmenu' 'string' eTypes 'tag' 'etype' 'value' 5} ...
-        {} ...
-        {'style' 'text' 'string' 'Channel selection:' 'fontweight' 'bold'} ...
-        {'style' 'edit' 'tag' 'chanlist'} ...
-        {'style' 'pushbutton' 'string'  '...', 'enable' 'on' ...
-        'callback' "tmpEEG = get(gcbf, 'userdata'); tmpchanlocs = tmpEEG.chanlocs; [tmp tmpval] = pop_chansel({tmpchanlocs.labels},'withindex','on'); set(findobj(gcbf,'tag','chanlist'),'string',tmpval); clear tmp tmpEEG tmpchanlocs tmpval" } ...
-        {} ...
-        {'style' 'text' 'string' 'Tau (time lag):' 'fontweight' 'bold'} ...
-        {'style' 'edit' 'string' '1' 'tag' 'tau'} ...
-        {} ...
-        {'style' 'text' 'string' 'Embedding dimension:' 'fontweight' 'bold'} ...
-        {'style' 'edit' 'string' '2' 'tag' 'm'}  ...
-        {} ...
-        {'style' 'checkbox' 'string' 'Plot entropy outputs' 'tag' 'vis' 'value' 1 'fontweight' 'bold'}  ...
-        };
-    param = inputgui(uigeom,uilist,'pophelp(''pop_entropy'')','entropy EEGLAB plugin',EEG);
-    entropyType = eTypes{param{1}};
-    if ~isempty(param{2})
-        chanlist = split(param{2});
-    else
-        chanlist = {EEG.chanlocs.labels}';
+% -----------------------------
+% Get params: GUI if none, else name–value pairs
+% -----------------------------
+if nargin == 1 || (nargin == 2 && isempty(varargin{1}))
+    [measure, chanlist, tau, m, coarsing, num_scales, filt_scales, n, vis, paraComp] = ...
+        escape_compute_gui(EEG);
+else
+    if mod(numel(varargin),2) ~= 0
+        error('Options must be provided as name–value pairs.');
     end
-    tau  = str2double(param{3});
-    m = str2double(param{4});
-    vis = logical(param{5});
+    for k = 1:2:numel(varargin)
+        key = lower(string(varargin{k}));
+        val = varargin{k+1};
+        switch key
+            case 'measure'
+                measure = val;
+            case 'chanlist'
+                if ischar(val) || isstring(val)
+                    % allow "all" or space/comma-separated labels (same behavior as GUI)
+                    if strcmpi(string(val),'all')
+                        chanlist = {EEG.chanlocs.labels}';
+                    else
+                        chanlist = regexp(char(val),'[^,\s]+','match')';
+                    end
+                elseif iscell(val)
+                    chanlist = val(:);
+                else
+                    error('Channels must be ''all'', a string list, or a cellstr.');
+                end
+            case 'tau'
+                tau = double(val);
+            case 'm'
+                m = double(val);
+            case 'r'
+                r = double(val);
+            case 'coarsing'
+                coarsing = val;
+            case 'num_scales'
+                num_scales = double(val);
+            case 'filt'
+                filt_scales = logical(val);
+            case 'n'
+                n = double(val);
+            case 'vis'
+                vis = logical(val);
+            case 'parallel'
+                paraComp = logical(val);
+            case 'progress'
+                trackProg = logical(val);
+            case 'kernel'
+                kernel_meth = val;
+            case 'blocksize'
+                blocksize = double(val);
+            otherwise
+                error('Unknown option: %s', key);
+        end
+    end
 end
 
+% --------
+% Defaults
+% --------
 
-%% 2nd GUI to select additional parameters
-
-if nargin == 1 && contains(lower(entropyType), 'multiscale')
-    cTypes = {'Mean' 'Standard deviation (default)' 'Variance'};
-    uigeom = { [.5 .6] .5 [.9 .3] .5 .5 };
-    uilist = {
-        {'style' 'text' 'string' 'Coarse graining method:'} ...
-        {'style' 'popupmenu' 'string' cTypes 'tag' 'stype' 'value' 2} ...
-        {} ...
-        {'style' 'text' 'string' 'Number of scale factors:' } ...
-        {'style' 'edit' 'string' '30' 'tag' 'n'}  ...
-        {} ...
-        {'style' 'checkbox' 'string' 'Bandpass filter each time scale (recommended to control for spectral bias)','tag' 'filtData','value',0}  ...
-        };
-    param = inputgui(uigeom,uilist,'pophelp(''pop_entropy'')','get_entropy() EEGLAB plugin',EEG);
-    coarseType = cTypes{param{1}};
-    nScales = str2double(param{2});
-    filtData = logical(param{3});
-end
-
-%% 3rd GUI for fuzzy power
-
-if nargin == 1 && contains(entropyType, 'Fuzzy')
-    uigeom = { [.9 .3] };
-    uilist = { {'style' 'text' 'string' 'Fuzzy power:' } ...
-        {'style' 'edit' 'string' '2' 'tag' 'n'}  };
-    param = inputgui(uigeom,uilist,'pophelp(''pop_entropy'')','entropy EEGLAB plugin',EEG);
-    n = str2double(param{1});
-end
-
-%% Defaults if something was missed in command line
-
+% general parameters
 if ~exist('chanlist','var') || isempty(chanlist)
     disp('No channels were selected: selecting all channels (default)')
     chanlist = {EEG.chanlocs.labels}';
 end
-if ~exist('entropyType','var') || isempty(entropyType)
+if ~exist('measure','var') || isempty(measure)
     disp('No entropy type selected: selecting Refined composite multiscale fuzzy entropy (default)')
-    entropyType = 'Refined composite multiscale fuzzy entropy';
+    measure = 'Refined composite multiscale fuzzy entropy';
 end
 if ~exist('tau','var') || isempty(tau)
     disp('No time lag selected: selecting tau = 1 (default).')
@@ -160,58 +157,61 @@ if ~exist('m','var') || isempty(m)
     disp('No embedding dimension selected: selecting m = 2 (default).')
     m = 2;
 end
+if ~exist('r','var') || isempty(r)
+    disp('No similarity bound selected: selecting r = .15 (default).')
+    r = .15;
+end
 if ~exist('vis','var') || isempty(vis)
-    disp('Plotting option not selected: turning plotting ON (default).')
+    disp('No plotting option not selected: turning plotting ON (default).')
     vis = true;
 end
-if contains(lower(entropyType), {'mse' 'mfe' 'rcmfe'})
-    if ~exist('coarseType','var') || isempty(coarseType)
+if ~exist('progress','var') || isempty(trackProg)
+    disp('No progress tracking defined: setting it to ON (default).')
+    trackProg = true;
+end
+if ~exist('parallel','var') || isempty(paraComp)
+    disp('Computing method not selected: turning parallel computing ON (default).')
+    paraComp = true;
+end
+
+% multiscale parameters
+if contains(lower(measure), {'mse' 'mfe' 'rcmfe'})
+    if ~exist('coarsing','var') || isempty(coarsing)
         disp('No coarse graining method selected: selecting standard deviation (default).')
-        coarseType = 'Standard deviation';
+        coarsing = 'Standard deviation';
     end
-    if ~exist('nScales','var') || isempty(nScales)
-        disp('Number of scale factors not selected: selecting nScales = 30 (default).')
-        nScales = 30;
+    if ~exist('num_scales','var') || isempty(num_scales)
+        disp('Number of scale factors not selected: selecting num_scales = 30 (default).')
+        num_scales = 30;
     end
-    if ~exist('filtData','var') || isempty(filtData)
-        filtData = false;
+    if ~exist('filt_scales','var') || isempty(filt_scales)
+        filt_scales = false;
+        disp("Filtering each scale factor (from Kosciessa et al. 2017) set to: OFF.")
+    else
+        disp("Filtering each scale factor (from Kosciessa et al. 2017) set to: ON.")
     end
 else
-    coarseType = [];
-    nScales = [];
-    filtData = [];
+    coarsing = [];
+    num_scales = [];
+    filt_scales = [];
 end
-if contains(lower(entropyType), {'fuzzen' 'mfe' 'rcmfe'})
+
+% Fuzzy parameters
+if contains(lower(measure), {'fuzzen' 'mfe' 'rcmfe'})
     if ~exist('n','var') || isempty(n)
-        disp('No fuzzy power selected: selecting n = 2 (default).')
+        disp('No fuzzy power selected: using n = 2 (default).')
         n = 2;
     end
-else
-    n = [];
-end
-
-% r = .15; % Hardcode r to .15 because data are later normalized to have SD of 1 (Azami approach)
-
-% % parallel computing
-parallelComp = false;   % request parallel mode (to add to GUI and command line options)
-p = gcp('nocreate');   % get current pool (if any)
-if parallelComp
-    if isempty(p)
-        n = max(2, min(6, feature('numcores')-1));  % safe
-        % n = feature('numcores')-1; % use almost all cores
-        p = parpool('Processes', n);
-        pctRunOnAll maxNumCompThreads(1);   % keep each worker single-threaded
-        % pctRunOnAll setenv('OMP_NUM_THREADS','1'); setenv('MKL_NUM_THREADS','1');
-        fprintf('Started new pool with %d workers.\n', p.NumWorkers);
-    else
-        fprintf('Pool already running with %d workers.\n', p.NumWorkers);
+    if ~exist('kernel','var') || isempty(kernel_meth)
+        disp('Kernel method not selected: using exponential kernel (default).')
+        kernel_meth = 'exponential';
     end
-else
-    if ~isempty(p)
-        delete(p);
-        fprintf('Closed existing pool.\n');
+    if ~exist('blocksize','var') || isempty(blocksize)
+        disp('BlockSize not specified: using blocksize = 256 (default).')
+        blocksize = 256;
     end
 end
+
 
 %% Compute entropy depending on choices
 
@@ -232,31 +232,41 @@ chanLabels = {EEG.chanlocs(chanIdx).labels}; % channel labels
 chanlocs = EEG.chanlocs(chanIdx);
 
 % preallocate memory
-if contains(lower(entropyType), {'mse' 'mfe' 'rcmfe'})
-    entropy = nan(nChan, nScales);
+if contains(lower(measure), {'mse' 'mfe' 'rcmfe'})
+    entropy = nan(nChan, num_scales);
 else
     entropy = nan(nChan,1);
 end
 scales = {};
 
 % COMPUTE ENTROPY/COMPLEXITY MEASURES
-switch entropyType
+switch measure
 
     % Sample Entropy (SampEn)
     case 'SampEn'
-        entropy = compute_SampEn(data, 'm', m, 'tau', tau, 'Parallel', parallelComp);
+        % entropy = compute_SampEn(data, 'm', m, 'tau', tau, 'Parallel', parallelComp);
+        entropy = compute_SampEn(data, 'm', m, 'r', r, 'parallel', paraComp, 'progress', trackProg);
+
         
     % Fuzzy Entropy (FuzzEn)
     case 'FuzzEn'
-        kernel_meth = 'exponential'; % 'exponential' (default) or 'gaussian'
-        entropy = compute_FuzzEn(data, 'm', m, 'tau', tau, 'n', n, ...
-            'Kernel', kernel_meth, 'Parallel', parallelComp);
+        % kernel_meth = 'exponential'; % 'exponential' (default) or 'gaussian'
+        entropy = compute_FuzzEn(data, 'm', m, 'tau', tau, 'n', n, 'r', r, ...
+            'Kernel', kernel_meth, 'BlockSize',blocksize, 'Parallel', paraComp, 'progress', trackProg);
 
     % Extrema-Segmented Entropy (ExSEnt)    
     case 'ExSEnt'
-        [HD, HA, HDA, info] = compute_ExSEnt(data, 'm', m, ...
-            'alpha', 0.20, 'lambda', 0.01, 'Plot', false, ...  % add these options to GUI/command?
-            'Parallel', parallelComp);
+        % HD = nan(nChan,1);
+        % HA = nan(nChan,1);
+        % HDA = nan(nChan,1);
+        % parfor iChan = 1:nChan
+        %     fprintf('channel %g/%g\n', iChan, nChan)
+        %     [HD(iChan,:), HA(iChan,:), HDA(iChan,:)] = compute_ExSEnt(data(iChan,:), 0.001, m, r);
+        % end
+
+        [HD, HA, HDA, info] = compute_ExSEnt2(data, 'm', m, ...
+            'r', r, 'lambda', 0.001, 'Plot', false, ...  % add these options to GUI/command?
+            'Parallel', paraComp);
 
     % Fractal Dimension (FracDim)
     case 'FracDim'
@@ -269,68 +279,78 @@ switch entropyType
             'RejectBursts', true, 'WinFrac', 0.02, 'ZThresh', 6, ...
             'RobustFit', 'ols', ... %  'theilsen' | 'ols'
             'ScaleTrimIQR', true, 'MinJ', [], 'MaxJ', [], ...
-            'Parallel', parallelComp, 'Verbose', true);
+            'Parallel', paraComp);
 
     case 'MSE'
 
-          % Kosciessa-style narrowband MSE (default): annuli passbands + filter-skip
-          % [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'nScales', nScales, ...
-          %     'Parallel', parallelComp, 'Verbose', true, 'Progress', true);
+        % % Origianl Costa 2002 MSE
+        % parfor iChan = 1:nChan
+        %     fprintf('channel %g/%g\n',iChan, nChan);
+        %     % [ entropy(iChan,:), A, B ] = mse(data(iChan,:));
+        %     entropy(iChan,:) = compute_mse_costa(data(iChan,:), m, .15, tau, 'mean', num_scales, filt_scales, fs)
+        % end
+        % if ~filt_scales
+        %     scales = arrayfun(@(x) {num2str(x)}, 1:num_scales);
+        % end
+        
+      % Enhanced classic MSE
+      % [entropy, scales] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
+      %     'FilterMode', 'none', 'coarsing', coarsing, 'num_scales', num_scales, ...
+      %     'Parallel', parallelComp, 'Progress', true);           
+         
+         if filt_scales 
+             % Kosciessa-style narrowband MSE (default): annuli passbands + filter-skip
+             filter_mode = 'narrowband';  %  'narrowband' (default, annuli) | 'lowpass' | 'highpass' | 'none'
+         else
+             filter_mode = 'none';
+         end
 
-          % no filtering (classic MSE pipeline)
-          [entropy, scales] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
-              'FilterMode', 'none', 'CoarseType', coarseType, 'nScales', nScales, ...
-              'Parallel', parallelComp, 'Progress', true);
+         [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, 'r', r, ...
+              'FilterMode', filter_mode, 'coarsing', coarsing, 'num_scales', num_scales, ...
+              'Parallel', paraComp, 'Progress', true);
+
+          % % Time-resolved version
+          % [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
+          %      'FilterMode', filter_mode, 'coarsing', coarsing, 'num_scales', num_scales, ...
+          %     'TimeWin', 2, 'TimeStep', 1, ...
+          %     'Parallel', parallelComp, 'Progress', true);
 
           
-        % % Classic mode
-        % [entropy, scales, info] = compute_mse(data, fs, ...
-        %     m, r, tau, coarseType, nScales, true, ...
-        %     'FilterMode','lowpass', 'CoarseMethod','stat', ...
-        %     'Parallel','none', 'Verbose',true, 'Progress',true, 'ProgressStyle','waitbar');
-
-
     case 'MFE'
-        % disp('Computing multiscale fuzzy entropy...')
-        % progressbar('Channels')
-        % % t1 = tic;
-        % for iChan = 1:nChan
-        %     fprintf('Channel %d: \n', iChan)
-            [entropy(iChan,:), scales] = compute_mfe(data, ...
-                m, r, tau, coarseType, nScales, filtData, EEG.srate, n);
-            % progressbar(iChan/nChan)
-            % % entropy(iChan,1:length(enttmp)) = enttmp;
-        % end
-        % toc(t1)
+        % [entropy, scales] = compute_mfe(data, ...
+        %     m, r, tau, coarsing, num_scales, filt_scales, EEG.srate, n);
 
-        % % Remove NaN scales
-        % idx = isnan(entropy(1,:));
-        % entropy(:,idx) = [];
-        % scales(idx) = [];
+         filter_mode = 'narrowband';  %  'narrowband' (default, annuli) or 'none'
+         [entropy, scales, info] = compute_mfe(EEG, 'Fs', fs, 'm', m, 'tau', tau, 'r', r, ...
+              'FilterMode', filter_mode, 'coarsing', coarsing, 'num_scales', num_scales, ...
+              'Parallel', paraComp, 'Progress', true);
+
+          % % Time-resovled version
+          % [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
+          %      'FilterMode', filter_mode, 'coarsing', coarsing, 'num_scales', num_scales, ...
+          %     'TimeWin', 2, 'TimeStep', 1, ...
+          %     'Parallel', parallelComp, 'Progress', true);
+
 
     case 'RCMFE'
-        % disp('Computing multiscale fuzzy entropy...')
-        % progressbar('Channels')
-        % for iChan = 1:nChan
-            % fprintf('Channel %d: \n', iChan)
-            % signal = EEG.data(chanIdx(iChan),:);
-            [entropy(iChan,:), scales] = compute_rcmfe(signal, ...
-                m, r, tau, coarseType, nScales, filtData, EEG.srate, n);
-            % [entropy(iChan,:), scales] = compute_rcmfe(EEG.data(iChan,:),m,r,tau,coarseType,nScales,filtData,EEG.srate);
-            % progressbar(iChan/nChan)
-        % end
-
-    % Spectral entropy (SpecEn) - Over time
-    case 'SpecEn' 
-        disp('Computing spectral entropy...')
-        progressbar('Channels')
-        parfor iChan = 1:nchan
-            % fprintf('Channel %d \n', iChan)
-            [entropy(iChan,:),te] = pentropy( zscore(EEG.data(chanIdx(iChan),:)), EEG.srate);
-
-            fprintf('   %s: %6.3f \n', EEG.chanlocs(iChan).labels, entropy(iChan,:))
-            progressbar(iChan/nchan)
+        parfor iChan = 1:nChan
+            fprintf('channel %g/%g\n',iChan, nChan);
+            entropy(iChan,:) = compute_rcmfe(data(iChan,:), ...
+                m, .15, tau, coarsing, num_scales, fs, n, false);
         end
+        scales = arrayfun(@(x) {num2str(x)}, 1:num_scales);
+
+    % % Spectral entropy (SpecEn) - Over time
+    % case 'SpecEn' 
+    %     disp('Computing spectral entropy...')
+    %     progressbar('Channels')
+    %     parfor iChan = 1:nchan
+    %         % fprintf('Channel %d \n', iChan)
+    %         [entropy(iChan,:),te] = pentropy( zscore(EEG.data(chanIdx(iChan),:)), EEG.srate);
+    % 
+    %         fprintf('   %s: %6.3f \n', EEG.chanlocs(iChan).labels, entropy(iChan,:))
+    %         progressbar(iChan/nchan)
+    %     end
 
     otherwise
         error('Unknown entropy type. Please select one of the options (see help get_entropy).')
@@ -348,15 +368,19 @@ end
 %     end
 % end
 
-% Visualize
+% Visualize / Plot
 if vis
     if nChan>1
-        if strcmpi(entropyType, 'ExSEnt')
+        if strcmpi(measure, 'ExSEnt')
             escape_plot(HD, chanlocs, 'SampEn of durations', scales);
             escape_plot(HA, chanlocs, 'SampEn of amplitudes', scales);
             escape_plot(HDA, chanlocs, 'Joint SampEn of durations & amplitudes', scales);
         else
-            escape_plot(entropy, chanlocs, entropyType, scales);
+            % % Standard plot
+            escape_plot(entropy, chanlocs, measure, scales);
+
+            % Time-resolved plot
+            % escape_plot(info.mse_time, EEG.chanlocs, 'MSE (time-resolved, 2s/1s)', scales, info.time_sec);
         end
     else
         disp("Sorry, you need more than 1 EEG channel for visualization.")
@@ -364,17 +388,17 @@ if vis
 end
 
 % outputs to export in EEG structure
-if strcmpi(entropyType, 'ExSEnt')
-    EEG.escape.(entropyType).data.HD = HD;
-    EEG.escape.(entropyType).data.HA = HA;
-    EEG.escape.(entropyType).data.HDA = HDA;
+if strcmpi(measure, 'ExSEnt')
+    EEG.escape.(measure).data.HD = HD;
+    EEG.escape.(measure).data.HA = HA;
+    EEG.escape.(measure).data.HDA = HDA;
 else
-    EEG.escape.(entropyType).data = entropy;
+    EEG.escape.(measure).data = entropy;
 end
-EEG.escape.(entropyType).electrode_labels = chanLabels;
-EEG.escape.(entropyType).electrode_locations = chanlocs;
-if contains(lower(entropyType), {'mse' 'mfe' 'rcmfe'})
-    EEG.escape.(entropyType).scales = scales;
+EEG.escape.(measure).electrode_labels = chanLabels;
+EEG.escape.(measure).electrode_locations = chanlocs;
+if contains(lower(measure), {'mse' 'mfe' 'rcmfe'})
+    EEG.escape.(measure).scales = scales;
 end
 
 % ADD PARAMETERS USED IN STRUCTURE OUTPUT 
@@ -385,9 +409,8 @@ chanLabels = strjoin(chanlist);
 chanLabels = insertBefore(chanLabels," ", "'");
 chanLabels = insertAfter(chanLabels," ", "'");
 com = sprintf('EEG = escape_compute(''%s'', {''%s''}, %d, %d, %s, %d, %d, %s, %d);', ...
-    entropyType,chanLabels,tau,m,coarseType,nScales,filtData,'[]',vis);
+    measure,chanLabels,tau,m,coarsing,num_scales,filt_scales,'[]',vis);
 
-gong
 disp('Done computing with Escape! Outputs can be found in the EEG.escape structure.')
 fprintf('Time to compute: %.2f minutes. \n', toc(tstart)/60)
 
