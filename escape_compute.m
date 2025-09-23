@@ -19,7 +19,7 @@ function [EEG, com] = escape_compute(EEG, varargin)
 %   vis - visualize entropy outputs (1, default) or not (0)
 %
 % USAGE:
-%   1) Import EEG datra into EEGLAB
+%   1) Import EEG data into EEGLAB
 %   2) Preprocess as necessary (e.g., reference, clean data with ASR, etc.)
 %   3) GUI mode: Tools > Compute entropy
 % or
@@ -132,9 +132,9 @@ else
                 blocksize = double(val);
             case 'filter_mode'
                 filter_mode = val;
-            case 'TimeWin'
+            case 'timewin'
                 TimeWin = double(val);
-            case 'TimeStep'
+            case 'timestep'
                 TimeStep = double(val);
             otherwise
                 error('Unknown option: %s', key);
@@ -287,7 +287,7 @@ switch measure
 
     case 'MSE'
         
-        % Classic MSE
+        % Classic (enhanced) Costa MSE
         [entropy, scales] = compute_MSE(data, 'm', m, 'tau', tau, ...
             'coarsing', coarsing, 'num_scales', num_scales, ...
             'Parallel', paraComp, 'Progress', trackProg);
@@ -302,10 +302,8 @@ switch measure
               'TimeWin', TimeWin, 'TimeStep', TimeStep); % for time-resolved version
 
     case 'MFE'
-        % [entropy, scales] = compute_mfe(data, ...
-        %     m, r, tau, coarsing, num_scales, filt_scales, EEG.srate, n);
 
-         [entropy, scales, info] = compute_MFE(EEG, 'Fs', fs, 'm', m, ...
+         [entropy, scales] = compute_MFE(data, 'm', m, ...
              'tau', tau, 'r', r, 'coarsing', coarsing, 'num_scales', num_scales, ...
               'Parallel', paraComp, 'Progress', true);
 
@@ -358,7 +356,9 @@ if vis
             escape_plot(entropy, chanlocs, measure, scales);
 
             % Time-resolved plot
-            % escape_plot(info.mse_time, EEG.chanlocs, 'MSE (time-resolved, 2s/1s)', scales, info.time_sec);
+            if strcmpi(measure, 'mMSE') && ~isempty(TimeStep)
+                escape_plot(info.mse_time, EEG.chanlocs, 'Time-resolved mMSE', scales, info.time_sec);
+            end
         end
     else
         disp("Sorry, you need more than 1 EEG channel for visualization.")

@@ -63,45 +63,48 @@ EEG = escape_compute(EEG, 'measure', 'ExSEnt', 'r', .15);
 
 EEG = escape_compute(EEG, 'measure', 'FracDim');
 
-
 %% Multiscale entropy (MSE)
 
 EEG = escape_compute(EEG, 'measure', 'MSE', ...
-    'coarsing', 'std', ...     % 'median' (default) 'mean' 'trimmed mean' 'std' 'var'
-    'num_scales', 30, ...       % number of scale factors to compute (default = 15; range = 5-100 depending on sample rate)
+    'coarsing', 'median', ...     % 'median' (default) 'mean' 'trimmed mean' 'std' 'var'
+    'num_scales', 50, ...       % number of scale factors to compute (default = 20; range = 5-100 depending on sample rate)
     'parallel', true, 'progress', true);
+
 
 %% Modified MSE (mMSE)
 
 EEG = escape_compute(EEG, 'measure', 'mMSE', ...
     'coarsing', 'median', ... % 'median' (default) 'mean' 'std' 'variance'
-    'num_scales', 20, ...
+    'num_scales', 50, ...
     'filter_mode', 'narrowband', ...  %  'narrowband' (default, annuli), 'none'
     'parallel', true, 'progress', true);
+
+% escape_plot(EEG.escape.mMSE.data, EEG.chanlocs,'mMSE',EEG.escape.mMSE.scales)
+
 
 %% Modified MSE (mMSE) - Time-resolved version
 
 EEG = escape_compute(EEG, 'measure', 'mMSE', ...
-    'coarsing', 'std', ...  % 'median' (default) 'mean' 'std' 'variance'
-    'num_scales', 20, ...
+    'coarsing', 'median', ...  % 'median' (default) 'mean' 'std' 'variance'
+    'num_scales', 15, ...
     'filter_mode', 'narrowband', ...  %  'narrowband' (default, annuli), 'none'
-    'TimeWin', 2, ...       %  window length (in s; default = 2 for continuous data)
-    'TimeStep', 0.5, ...    % step between centers (s); default = TimeWin/2
+    'TimeWin', 4, ...       %  window length (in s; default = 2 for continuous data)
+    'TimeStep', 2, ...    % step between centers (s); default = TimeWin/2
     'parallel', true, 'progress', true);
 
 
 %% Multiscale fuzzy entropy (MFE)
 
-coarsing = 'median';  % 'median' 'mean' 'sd' 'variance'
 EEG = escape_compute(EEG,'MFE',[],[],[], coarsing, 10, false);
 
 
 %% Multiscale fuzzy entropy (MFE)
 
-coarsing = 'median';  % 'median' 'mean' 'sd' 'variance'
-EEG = escape_compute(EEG,'RCMFE',[],[],[], coarsing, 10, false);
-
-
+EEG = escape_compute(EEG, 'measure', 'MFE', ...
+    'coarsing', 'std', ...     % 'median' (default) 'mean' 'trimmed mean' 'std' 'var'
+    'num_scales', 20, ...       % number of scale factors to compute (default = 20; range = 5-100 depending on sample rate)
+    'n', 2, ...                 % fuzzy power (default = 2)
+    'parallel', true, 'progress', true);
 
 
 %% 

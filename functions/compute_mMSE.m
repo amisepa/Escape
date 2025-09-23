@@ -114,14 +114,24 @@ function [mse, scales, info] = compute_mMSE(data, varargin)
 % • In filtskip mode, scale 1 is HP-only; scales >1 are annuli widened by ±NBWiden.
 %   Extremely narrow bands auto-switch to IIR; unrealizable FIR bands are dropped.
 %
+% % References:
+%   Kosciessa et al., (2020). Standard multiscale entropy reflects neural 
+%       dynamics at mismatched temporal scales. PLoS Comput Biol, 16(5), e1007885. 
+%
+%   Kloosterman et al., (2020). Modified multiscale entropy (mMSE): implementation 
+%       details & time-resolved analysis; note scale-wise normalization of 
+%       r and recommended samples per scale. eLife, 9:e54201. 
+% 
+%   Grandy et al. (2016). On data requirements for accurate MSE in 
+%       neurophysiology; practical guidance on minimum samples per scale 
+%       and segment concatenation. Sci Rep, 6:23073.
+%
 % -------------------------------------------------------------------------
 % Copyright (C) 2025
 % EEGLAB Escape plugin — Author: Cedric Cannard
 % License: GNU GPL v2 or later
 % -------------------------------------------------------------------------
 
-
-tStart = tic;
 
 % -------- Parse options
 p = inputParser;
@@ -146,6 +156,8 @@ p.addParameter('TOI', [], @(x) isempty(x) || (isnumeric(x) && isvector(x)));
 p.addParameter('TimeStep', [], @(x) isempty(x) || (isnumeric(x) && isscalar(x) && x>0));
 p.parse(varargin{:});
 o = p.Results;
+
+info = [];
 
 % -------- Accept EEGLAB struct or numeric
 [dat, fs_from_struct] = coerce_data_matrix(data);
@@ -195,6 +207,8 @@ if S < 1
     S = 1; o.filter_mode = 'none';
 end
 
+
+
 % -------- FT-style bands (±NBWiden); s=1 HP-only
 nyq   = o.Fs/2;
 bands = cell(1,S);
@@ -230,132 +244,230 @@ mse      = nan(nChan, S);
 cg_len   = zeros(1, S);
 mse_time = []; if doTime, mse_time = nan(nChan, S, nTOI); end
 
-useWB = (o.Progress && ~o.Parallel && usejava('desktop'));
-hWB = [];
-if useWB
-    try
-        hWB = waitbar(0,'Computing MSE...','Name','compute_mse progress bar');
-        waitbar(0, hWB, sprintf('Scale 1/%d • Channel 0/%d', S, nChan));
-    catch, hWB = []; end
-end
+useParScales = (o.Parallel && ~isempty(ver('parallel')));   % <-- parallel ACROSS SCALES
+useWB        = (o.Progress && ~useParScales && usejava('desktop'));
+hWB = []; dq = [];
+
 if o.Progress
-    fprintf('MSE: %d scales | Filter=%s/%s | Coarse=%s | Parallel(ch)=%d | TimeWin=%s | nTOI=%d\n', ...
-        S, o.filter_mode, o.FilterDesign, ct, o.Parallel, tern(doTime, sprintf('%.3gs', o.TimeWin), 'off'), nTOI);
+    if useParScales
+        fprintf('MSE/mMSE: %d scales | Filter=%s/%s | Coarse=%s | Parallel=ON (across scales) | TimeWin=%s | nTOI=%d\n', ...
+            S, o.filter_mode, o.FilterDesign, ct, tern(doTime, sprintf('%.3gs', o.TimeWin), 'off'), nTOI);
+        dq = parallel.pool.DataQueue;
+        afterEach(dq, @(s) fprintf('  scale %2d/%2d (done)\n', s, S));
+    else
+        fprintf('MSE/mMSE: %d scales | Filter=%s/%s | Coarse=%s | Parallel=OFF | TimeWin=%s | nTOI=%d\n', ...
+            S, o.filter_mode, o.FilterDesign, ct, tern(doTime, sprintf('%.3gs', o.TimeWin), 'off'), nTOI);
+        try
+            hWB = waitbar(0,'Computing mMSE...','Name','compute_mse progress bar');
+            waitbar(0, hWB, sprintf('Scale 1/%d • Channel 0/%d', S, nChan));
+        catch, hWB = []; end
+    end
 end
 
-% -------- Fill missing values pre-filter
+% -------- Fill missing values pre-filter (unchanged)
 for ch = 1:nChan
-    x = dat(ch,:); if any(~isfinite(x)), dat(ch,:) = fillmissing(x,'linear','EndValues','nearest'); end
+    x = dat(ch,:);
+    if any(~isfinite(x))
+        try
+            dat(ch,:) = fillmissing(x,'linear','EndValues','nearest');
+        catch
+            % simple fallback
+            isn = ~isfinite(x);
+            idx = find(~isn,1,'first'); if ~isempty(idx), x(1:idx-1) = x(idx); end
+            idx = find(~isn,1,'last');  if ~isempty(idx), x(idx+1:end) = x(idx); end
+            prev = [x(1), x(1:end-1)];
+            next = [x(2:end), x(end)];
+            bad  = isn & isfinite(prev) & isfinite(next);
+            x(bad) = 0.5*(prev(bad)+next(bad));
+            dat(ch,:) = x;
+        end
+    end
 end
+
 
 % -------- Scales loop
-for s=1:S
-    feff = o.Fs / s;
-    Y    = dat;
-    band = bands{s};
+% -------- Scales loop (parallel across SCALES if enabled)
+if useParScales
+    parfor s = 1:S
+        feff = o.Fs / s;
+        Y    = dat;           % local copy for worker
+        band = bands{s};
+        cg_len_s = 0;         % per-scale outputs
+        mse_s    = nan(nChan,1);
+        mseslice = [];        % [nChan x nTOI] if doTime
 
-    % --- Statistical path (no filtering)
-    if strcmpi(o.filter_mode,'none') || any(isnan(band))
-        [CG, nBins] = coarsegrain_stat(Y, s, ct);
-        cg_len(s)   = nBins;
-        minNeeded   = max([o.MinSamplesPerBin, o.m+1, 100]);  % Grandy stability floor
-        if nBins < minNeeded
-            if o.Progress, fprintf('  [drop] scale %d: nBins=%d (<%d)\n', s, nBins, minNeeded); end
+        % --- Statistical path (no filtering)
+        if strcmpi(o.filter_mode,'none') || any(isnan(band))
+            [CG, nBins] = coarsegrain_stat(Y, s, ct);
+            cg_len_s    = nBins;
+            minNeeded   = max([o.MinSamplesPerBin, o.m+1, 100]);  % Grandy stability floor
+            if nBins >= minNeeded
+                % per-channel SampEn (serial inside scale to avoid nested parfor)
+                for ch = 1:nChan
+                    mse_s(ch) = compute_SampEn(CG(ch,:), 'm', o.m, 'tau', o.tau, ...
+                                               'r', o.r, 'Parallel', false, 'Progress', false);
+                end
+                if doTime
+                    mseslice = time_windows_one_scale(CG, feff, o, nTOI, tCenters);
+                end
+            end
+            % (else: leave NaNs)
+        else
+            % --- Filtering path (unchanged logic)
+            isHPonly = isinf(band(2));
+            if strcmpi(o.FilterDesign,'iir')
+                Y = ft_iir(Y, band, o.Fs, o.IIROrder, o.PadLen);
+            else
+                nyq = o.Fs/2;
+                pbw = tern(isHPonly, nyq - band(1), band(2) - band(1));
+                veryNarrow = (pbw / o.Fs) < 0.01;   % <1% of Fs
+                if veryNarrow
+                    Y = ft_iir(Y, band, o.Fs, o.IIROrder, o.PadLen);
+                else
+                    Y = fir_zero_phase(Y, band, o.Fs, o.TransWidth, o.FIRMaxOrder, o.PadLen);
+                end
+            end
+
+            % --- Filtskip/coarse-grain and feasibility drop
+            if isHPonly
+                nStarts   = 1;
+                nBins_eff = size(Y,2);
+            else
+                nStarts   = s;
+                nBins_eff = floor(size(Y,2)/s);
+            end
+            cg_len_s = nBins_eff;
+
+            if strcmpi(o.FilterDesign,'fir')
+                nyq = o.Fs/2;
+                pbw_guard = tern(isHPonly, nyq - band(1), band(2) - band(1));
+                if isempty(o.TransWidth)
+                    tw_guess = max(0.15*max(pbw_guard,eps), o.Fs/size(Y,2));
+                else
+                    tw_guess = max(o.TransWidth, o.Fs/size(Y,2));
+                end
+                if (~isHPonly) && (pbw_guard < 2*tw_guess)
+                    % too narrow → leave NaNs & move on
+                    if ~isempty(dq) && o.Progress, send(dq, s); end
+                    cg_len(s) = cg_len_s; %#ok<PFOUS> (broadcast ok)
+                    continue
+                end
+            end
+            if nBins_eff < max(4, o.m+1)
+                if ~isempty(dq) && o.Progress, send(dq, s); end
+                cg_len(s) = cg_len_s; %#ok<PFOUS>
+                continue
+            end
+
+            % --- Whole-epoch SampEn across starts (serial inside scale)
+            vals = nan(nChan, nStarts);
+            for is = 1:nStarts
+                if nStarts==1
+                    CG = Y;
+                else
+                    last = is+(nBins_eff-1)*s;
+                    idx  = is:s:last;
+                    CG   = Y(:, idx);
+                end
+                tmp = nan(nChan,1);
+                for ch = 1:nChan
+                    tmp(ch) = compute_SampEn(CG(ch,:), 'm', o.m, 'tau', o.tau, ...
+                                             'r', o.r, 'Parallel', false, 'Progress', false);
+                end
+                vals(:,is) = tmp;
+            end
+            mse_s = mean(vals,2,'omitnan');
+
+            % --- Time-resolved (avg across starts)
+            if doTime
+                feff_eff = tern(nStarts==1, o.Fs, feff);
+                mseslice = time_windows_filtskip_one_scale(Y, s, nStarts, nBins_eff, feff_eff, o, nTOI, tCenters);
+            end
+        end
+
+        % write per-scale outputs
+        mse(:,s)  = mse_s;          %#ok<PFBNS> (sliced assignment)
+        cg_len(s) = cg_len_s;       %#ok<PFBNS>
+        if doTime && ~isempty(mseslice)
+            mse_time(:,s,:) = mseslice; %#ok<PFBNS>
+        end
+
+        % progress tick
+        if ~isempty(dq) && o.Progress, send(dq, s); end
+    end
+else
+    % -------- Serial loop with per-scale print + waitbar
+    for s = 1:S
+        if o.Progress
+            fprintf('  scale %2d/%2d\n', s, S);
+            if ~isempty(hWB) && isvalid(hWB)
+                try waitbar(s/S, hWB, sprintf('Computing mMSE... (scale %d/%d)', s, S)); catch, end
+            end
+        end
+
+        feff = o.Fs / s;
+        Y    = dat;
+        band = bands{s};
+
+        if strcmpi(o.filter_mode,'none') || any(isnan(band))
+            [CG, nBins] = coarsegrain_stat(Y, s, ct);
+            cg_len(s)   = nBins;
+            minNeeded   = max([o.MinSamplesPerBin, o.m+1, 100]);
+            if nBins >= minNeeded
+                for ch = 1:nChan
+                    mse(ch,s) = compute_SampEn(CG(ch,:), 'm', o.m, 'tau', o.tau, ...
+                                               'r', o.r, 'Parallel', false, 'Progress', false);
+                end
+                if doTime
+                    mse_time(:,s,:) = time_windows_one_scale(CG, feff, o, nTOI, tCenters);
+                end
+            end
             continue
         end
 
-        vals = nan(nChan,1);
-        if o.Parallel && ~isempty(ver('parallel'))
-            parfor ch = 1:nChan
-                vals(ch) = compute_SampEn(CG(ch,:), 'm', o.m, 'tau', o.tau, ...
-                                          'r', o.r, 'Parallel', false, 'Progress', false);
-            end
-        else
-            for ch = 1:nChan
-                vals(ch) = compute_SampEn(CG(ch,:), 'm', o.m, 'tau', o.tau, ...
-                                          'r', o.r, 'Parallel', false, 'Progress', false);
-            end
-        end
-        mse(:,s) = vals;
-
-        if doTime
-            mse_time = time_windows(CG, s, feff, o, mse_time, nTOI, tCenters, hWB, S, nChan);
-        end
-        continue
-    end
-
-    % --- Filtering (FT-like); auto IIR for very narrow bands
-    isHPonly = isinf(band(2));
-    if strcmpi(o.FilterDesign,'iir')
-        Y = ft_iir(Y, band, o.Fs, o.IIROrder, o.PadLen);
-    else
-        % Heuristic: prefer IIR when band is extremely narrow in Hz
-        if isHPonly
-            pbw = nyq - band(1);
-        else
-            pbw = band(2) - band(1);
-        end
-        veryNarrow = (pbw / o.Fs) < 0.01;   % <1% of Fs
-        if veryNarrow
+        % --- Filtering path (unchanged logic)
+        isHPonly = isinf(band(2));
+        if strcmpi(o.FilterDesign,'iir')
             Y = ft_iir(Y, band, o.Fs, o.IIROrder, o.PadLen);
         else
-            Y = fir_zero_phase(Y, band, o.Fs, o.TransWidth, o.FIRMaxOrder, o.PadLen);
+            nyq = o.Fs/2;
+            pbw = tern(isHPonly, nyq - band(1), band(2) - band(1));
+            veryNarrow = (pbw / o.Fs) < 0.01;
+            if veryNarrow
+                Y = ft_iir(Y, band, o.Fs, o.IIROrder, o.PadLen);
+            else
+                Y = fir_zero_phase(Y, band, o.Fs, o.TransWidth, o.FIRMaxOrder, o.PadLen);
+            end
         end
-    end
 
-    % --- Filtskip/coarse-grain and feasibility drop
-    if isHPonly
-        nStarts   = 1;
-        nBins_eff = size(Y,2);
-    else
-        nStarts   = s;
-        nBins_eff = floor(size(Y,2)/s);
-    end
-    cg_len(s) = nBins_eff;
-
-    % drop guard: too few coarse bins OR FIR unrealizable (if FIR path)
-    % tw_guess = feval(@()0); % dummy init
-    if strcmpi(o.FilterDesign,'fir')
         if isHPonly
-            pbw_guard = nyq - band(1);
+            nStarts   = 1;
+            nBins_eff = size(Y,2);
         else
-            pbw_guard = band(2) - band(1);
+            nStarts   = s;
+            nBins_eff = floor(size(Y,2)/s);
         end
-        if isempty(o.TransWidth)
-            tw_guess = max(0.15*max(pbw_guard,eps), o.Fs/size(Y,2));
-        else
-            tw_guess = max(o.TransWidth, o.Fs/size(Y,2));
+        cg_len(s) = nBins_eff;
+
+        if strcmpi(o.FilterDesign,'fir')
+            nyq = o.Fs/2;
+            pbw_guard = tern(isHPonly, nyq - band(1), band(2) - band(1));
+            if isempty(o.TransWidth)
+                tw_guess = max(0.15*max(pbw_guard,eps), o.Fs/size(Y,2));
+            else
+                tw_guess = max(o.TransWidth, o.Fs/size(Y,2));
+            end
+            if (~isHPonly) && (pbw_guard < 2*tw_guess)
+                if o.Progress, fprintf('  [drop] scale %d: FIR band too narrow (pbw=%.4gHz < 2*tw≈%.4gHz)\n', s, pbw_guard, tw_guess); end
+                continue
+            end
         end
-        if (~isHPonly) && (pbw_guard < 2*tw_guess)
-            if o.Progress, fprintf('  [drop] scale %d: FIR band too narrow (pbw=%.4gHz < 2*tw≈%.4gHz)\n', s, pbw_guard, tw_guess); end
+        if nBins_eff < max(4, o.m+1)
+            if o.Progress, fprintf('  [drop] scale %d: nBins=%d (<%d)\n', s, nBins_eff, max(4,o.m+1)); end
             continue
         end
-    end
-    if nBins_eff < max(4, o.m+1)
-        if o.Progress, fprintf('  [drop] scale %d: nBins=%d (<%d)\n', s, nBins_eff, max(4,o.m+1)); end
-        continue
-    end
 
-    % --- Whole-epoch SampEn across starts
-    vals = nan(nChan, nStarts);
-    if o.Parallel && ~isempty(ver('parallel'))
-        parfor is = 1:nStarts
-            if nStarts==1
-                CG = Y;
-            else
-                last = is+(nBins_eff-1)*s;
-                idx  = is:s:last;
-                CG   = Y(:, idx);
-            end
-            % vals(:,is) = sampen_block(CG, o.m, o.tau, o.r, false);
-            tmp = nan(nChan,1);
-            for ch = 1:nChan
-                tmp(ch) = compute_SampEn(CG(ch,:), 'm', o.m, 'tau', o.tau, ...
-                                         'r', o.r, 'Parallel', false, 'Progress', false);
-            end
-            vals(:,is) = tmp;
-        end
-    else
+        vals = nan(nChan, nStarts);
         for is = 1:nStarts
             if nStarts==1
                 CG = Y;
@@ -364,51 +476,25 @@ for s=1:S
                 idx  = is:s:last;
                 CG   = Y(:, idx);
             end
-
             tmp = nan(nChan,1);
             for ch = 1:nChan
                 tmp(ch) = compute_SampEn(CG(ch,:), 'm', o.m, 'tau', o.tau, ...
                                          'r', o.r, 'Parallel', false, 'Progress', false);
             end
             vals(:,is) = tmp;
-
-            if ~doTime && ~isempty(hWB) && isvalid(hWB)
-                try waitbar(((s-1)*nChan + nChan)/(S*nChan), hWB); catch; end
-            end
         end
-    end
-    mse(:,s) = mean(vals,2,'omitnan');
+        mse(:,s) = mean(vals,2,'omitnan');
 
-    % --- Time-resolved (average across starts)
-    if doTime
-        if nStarts==1
-            feff_eff = o.Fs;     % HP-only, no skipping
-        else
-            feff_eff = feff;
+        if doTime
+            feff_eff = tern(nStarts==1, o.Fs, feff);
+            mse_time(:,s,:) = time_windows_filtskip_one_scale(Y, s, nStarts, nBins_eff, feff_eff, o, nTOI, tCenters);
         end
-        mse_time = time_windows_filtskip(Y, s, nStarts, nBins_eff, feff_eff, o, mse_time, nTOI, tCenters, hWB, S, nChan);
     end
 end
 
-% Drop NaN-only scales (but never return 0 columns)
-nanScale = all(isnan(mse),1);
-if any(nanScale) && sum(~nanScale) >= 1
-    mse(:,nanScale) = []; scales(nanScale) = []; cg_len(nanScale) = [];
-    if doTime, mse_time(:,nanScale,:) = []; end
-elseif all(nanScale) && ~isempty(nanScale)
-    keep = find(nanScale, 1, 'first');
-    drop = setdiff(1:numel(nanScale), keep);
-    mse(:,drop) = []; scales(drop) = []; cg_len(drop) = [];
-    if doTime, mse_time(:,drop,:) = []; end
-end
+% Close waitbar (serial mode only)
+if ~isempty(hWB) && isvalid(hWB), try close(hWB); catch, end, end
 
-% Close waitbar & info
-if ~isempty(hWB) && isvalid(hWB), try close(hWB); catch; end, end
-info = struct('filter_mode',o.filter_mode,'FilterDesign',o.FilterDesign,'TransWidth',o.TransWidth, ...
-    'FIRMaxOrder',o.FIRMaxOrder,'IIROrder',o.IIROrder,'PadLen',o.PadLen, ...
-    'MinSamplesPerBin',o.MinSamplesPerBin,'Parallel',o.Parallel, ...
-    'fs',o.Fs,'cg_len',cg_len,'elapsed',toc(tStart), ...
-    'NBWiden',o.NBWiden,'TimeWin',o.TimeWin,'TOI',o.TOI,'TimeStep',o.TimeStep);
 
 if doTime
     info.mse_time = mse_time;          % chan x scale x time
@@ -612,5 +698,64 @@ if pad>0
     Ypad = filtfilt(b,a, Ypad.').'; Y = Ypad(:, pad+1:end-pad);
 else
     Y = filtfilt(b,a, Y.').';
+end
+end
+
+function M = time_windows_one_scale(CG, feff, o, nTOI, tCenters)
+% Return [nChan x nTOI] slice for statistical-path CG at one scale
+nChan = size(CG,1);
+M = nan(nChan, nTOI);
+W = max(1, round(o.TimeWin * feff));
+minW = max([o.m+1, 100]);
+if W < minW, return; end
+centers_bins = round(tCenters * feff) + 1;
+nBins = size(CG,2);
+starts = centers_bins - floor(W/2);
+stops  = starts + W - 1;
+keep   = starts>=1 & stops<=nBins;
+ki = find(keep);
+for ii = 1:numel(ki)
+    seg = CG(:, starts(ki(ii)):stops(ki(ii)));
+    for ch=1:nChan
+        M(ch, ki(ii)) = compute_SampEn(seg(ch,:), 'm', o.m, 'tau', o.tau, ...
+                                       'r', o.r, 'Parallel', false, 'Progress', false);
+    end
+end
+end
+
+function M = time_windows_filtskip_one_scale(Y, s, nStarts, nBins_eff, feff_eff, o, nTOI, tCenters)
+% Return [nChan x nTOI] slice for filtskip path at one scale
+nChan = size(Y,1);
+M = nan(nChan, nTOI);
+W = max(1, round(o.TimeWin * feff_eff));
+if W < max(4, o.m+1), return; end
+centers_bins = round(tCenters * feff_eff) + 1;
+nAvail = tern(nStarts==1, size(Y,2), nBins_eff);
+starts = centers_bins - floor(W/2);
+stops  = starts + W - 1;
+keep   = starts>=1 & stops<=nAvail;
+ki = find(keep);
+for ii = 1:numel(ki)
+    tiAbs = ki(ii);
+    acc = zeros(nChan,1);
+    good = true;
+    for is = 1:nStarts
+        if nStarts==1
+            idxv = starts(tiAbs):stops(tiAbs);
+        else
+            idx0 = is + (starts(tiAbs)-1)*s;
+            idxv = idx0 : s : idx0 + (W-1)*s;
+            idxv(idxv>size(Y,2))=[];
+        end
+        if numel(idxv) < max(4, o.m+1), good=false; break, end
+        seg = Y(:, idxv);
+        for ch=1:nChan
+            acc(ch) = acc(ch) + compute_SampEn(seg(ch,:), 'm', o.m, 'tau', o.tau, ...
+                                               'r', o.r, 'Parallel', false, 'Progress', false);
+        end
+    end
+    if good
+        M(:,tiAbs) = acc ./ nStarts;
+    end
 end
 end

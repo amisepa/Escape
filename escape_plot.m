@@ -74,26 +74,57 @@ if multiscale
 
     % X ticks (scales)
     if iscell(scales)
-        Xticks = scales;
-        nX = numel(scales);
+        Xticks = scales; nX = numel(scales);
     else
-        Xticks = arrayfun(@(x){num2str(x)}, 1:nScales);
-        nX = nScales;
+        Xticks = arrayfun(@(x){num2str(x)}, 1:nScales); nX = nScales;
     end
-    if nX > 30
-        newX = round(linspace(1, nX, min(20, nX)));
-    else
-        newX = 1:nX;
-    end
+    if nX > 30, newX = round(linspace(1, nX, min(20, nX))); else, newX = 1:nX; end
     set(gca,'XTick',newX,'XTickLabel',Xticks(newX),'FontWeight','normal');
-
-    % Colormap & colorbar
+    
+    % ===== FIX CROPPING: rotate labels + grow bottom margin =====
+    ax = gca;
+    ax.TickLabelInterpreter = 'none';          % prevents underscores from becoming subscripts
+    ax.XTickLabelRotation  = 45;               % 45° usually enough; use 60 if your labels are very long
+    ax.PositionConstraint  = 'outerposition';  % allow us to control outer box
+    
+    % Lift the axes a bit and shrink height so rotated labels fit
+    % drawnow;                                    % ensure TightInset is up to date
+    outer = ax.OuterPosition;                   % [left bottom width height] in normalized
+    ti    = ax.TightInset;                      % [l b r t] padding needed for tick labels etc.
+    extra = 0.02;                               % a touch more bottom space (tweak if needed)
+    newBottom = max(outer(2), ti(2) + extra);
+    newHeight = max(outer(4) - (newBottom - outer(2)) - (ti(4) + 0.01), 0.1);
+    ax.OuterPosition = [outer(1), newBottom, outer(3), newHeight];
+    
+    % make the colorbar, labels, title as you had -----
     colormap('parula');
     c = colorbar; ylabel(c,'Entropy','FontWeight','bold','FontSize',9);
-
-    % Labels & title
     xlabel('Scales'); ylabel('EEG channels');
     title(entropyType, 'Interpreter','none');
+
+
+    % % X ticks (scales)
+    % if iscell(scales)
+    %     Xticks = scales;
+    %     nX = numel(scales);
+    % else
+    %     Xticks = arrayfun(@(x){num2str(x)}, 1:nScales);
+    %     nX = nScales;
+    % end
+    % if nX > 30
+    %     newX = round(linspace(1, nX, min(20, nX)));
+    % else
+    %     newX = 1:nX;
+    % end
+    % set(gca,'XTick',newX,'XTickLabel',Xticks(newX),'FontWeight','normal');
+    % 
+    % % Colormap & colorbar
+    % colormap('parula');
+    % c = colorbar; ylabel(c,'Entropy','FontWeight','bold','FontSize',9);
+
+    % % Labels & title
+    % xlabel('Scales'); ylabel('EEG channels');
+    % title(entropyType, 'Interpreter','none');
 
     set(findall(gcf,'type','axes'),'FontSize',10,'FontWeight','bold');
 
@@ -117,15 +148,15 @@ if multiscale
     title(sprintf('Channel %s', chanlocs(peak_channel).labels), 'Interpreter','none');
 
     % ---- Topography at peak scale ----
-    subplot(3,3,9);
+    subplot(3,3,3);
     topoplot(entropyData(:,peak_scale), chanlocs, 'emarker',{'.','k',8,1}, 'electrodes','on');
     clim([min(entropyData(:,peak_scale)) max(entropyData(:,peak_scale))]);
     colormap('parula');
     title(sprintf('%s @ scale %s', entropyType, sclabel), 'Interpreter','none');
 
-    % ---- (NEW) Time-resolved trace at the peak channel & scale ----
+    % ---- Time-resolved trace at the peak channel & scale ----
     if isTimeResolved
-        subplot(3,3,3); hold on; box on;
+        subplot(3,3,9); hold on; box on;
         tr = squeeze(entropyData3D(peak_channel, peak_scale, :));
         if isempty(time_sec) || numel(time_sec) ~= numel(tr)
             t = 1:numel(tr);
