@@ -20,7 +20,6 @@ pluginPath = fileparts(which('eegplugin_escape.m'));
 cd(pluginPath)
 EEG = pop_loadset('filename','sample_data.set','filepath',fullfile(pluginPath,'tutorial'));
 
-
 %% Sample Entropy (SampEn) via GUI
 
 EEG = escape_compute(EEG);  % or Tools > Compute entropy
@@ -47,10 +46,10 @@ EEG = escape_compute(EEG, 'measure', 'SampEn');
 %% Fuzzy entropy (FuzzEn)
 
 % default parameters
-EEG = escape_compute(EEG,'measure', 'FuzzEn');
+EEG = escape_compute(EEG, 'measure', 'FuzzEn');
 
 % Fine-tuning parameters (for demonstration only)
-EEG = escape_compute(EEG,'measure', 'FuzzEn', ...
+EEG = escape_compute(EEG, 'measure', 'FuzzEn', ...
     'n', 2, ...
     'kernel','gaussian', ...
     'blocksize', 128);
@@ -58,18 +57,37 @@ EEG = escape_compute(EEG,'measure', 'FuzzEn', ...
 
 %% Extrema-Segmented Entropy (ExSEnt)
 
-EEG = escape_compute(EEG,'measure', 'ExSEnt', 'r', .20);
+EEG = escape_compute(EEG, 'measure', 'ExSEnt', 'r', .15);
 
 %% Fractal dimension (votality)
 
-EEG = escape_compute(EEG,'measure', 'FracDim');
+EEG = escape_compute(EEG, 'measure', 'FracDim');
 
 
 %% Multiscale entropy (MSE)
 
-% Multiscale entropy with default parameters, on 10 time scales
-coarsing = 'median';  % 'median' 'mean' 'sd' 'variance'
-EEG = escape_compute(EEG,'MSE',[],[],[], coarsing, 12, true);
+EEG = escape_compute(EEG, 'measure', 'MSE', ...
+    'coarsing', 'std', ...     % 'median' (default) 'mean' 'trimmed mean' 'std' 'var'
+    'num_scales', 30, ...       % number of scale factors to compute (default = 15; range = 5-100 depending on sample rate)
+    'parallel', true, 'progress', true);
+
+%% Modified MSE (mMSE)
+
+EEG = escape_compute(EEG, 'measure', 'mMSE', ...
+    'coarsing', 'median', ... % 'median' (default) 'mean' 'std' 'variance'
+    'num_scales', 20, ...
+    'filter_mode', 'narrowband', ...  %  'narrowband' (default, annuli), 'none'
+    'parallel', true, 'progress', true);
+
+%% Modified MSE (mMSE) - Time-resolved version
+
+EEG = escape_compute(EEG, 'measure', 'mMSE', ...
+    'coarsing', 'std', ...  % 'median' (default) 'mean' 'std' 'variance'
+    'num_scales', 20, ...
+    'filter_mode', 'narrowband', ...  %  'narrowband' (default, annuli), 'none'
+    'TimeWin', 2, ...       %  window length (in s; default = 2 for continuous data)
+    'TimeStep', 0.5, ...    % step between centers (s); default = TimeWin/2
+    'parallel', true, 'progress', true);
 
 
 %% Multiscale fuzzy entropy (MFE)

@@ -13,8 +13,7 @@ function [D, SD, info] = compute_FracDim(data, varargin)
 %     'RejectBursts'   : true|false, MAD z-score burst rejection (default true)
 %     'WinFrac'        : window length for burst detection as fraction of x-axis (default 0.02)
 %     'ZThresh'        : MAD z threshold (default 6)
-%     'RobustFit'      : 'theilsen' | 'ols'  (default 'theilsen')
-%                        Note: 'huber' is mapped to 'theilsen' for portability.
+%     'RobustFit'      : 'theilsen' (default) or 'ols' 
 %     'ScaleTrimIQR'   : true|false, trim scale-wise slope outliers by IQR (default true)
 %     'MinBoxesPerCol' : minimum vertical boxes per x-column (default 1)
 %     'MinJ'           : minimum dyadic level (default [], auto)

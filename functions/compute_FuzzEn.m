@@ -23,6 +23,14 @@ function FuzzEn = compute_FuzzEn(data, varargin)
 %   • Data is z-score normalized per channel so std = 1
 %   • Uses bounded-memory, blockwise pair counting (no full M×M broadcasts).
 %
+% References:
+%   Chen, W., Wang, Z., Xie, H., & Yu, W. (2007). Characterization of 
+%       surface EMG signal based on fuzzy entropy. IEEE Transactions on 
+%       neural systems and rehabilitation engineering, 15(2), 266-272.
+%   Azami, H., Fernández, A., & Escudero, J. (2017). Refined multiscale 
+%       fuzzy entropy based on standard deviation for biomedical signal 
+%       analysis. Medical & biological engineering & computing, 55(11), 2037-2052.
+% 
 % -------------------------------------------------------------------------
 % Copyright (C) 2025
 % EEGLAB Escape plugin — Author: Cedric Cannard
@@ -192,27 +200,6 @@ end
 
 mu_mean = tern(num_p==0, NaN, sum_mu/num_p);
 end
-
-% function mu_mean = fuzzy_mean_similarity_fast(X, r, n, kernelType)
-% % Mean fuzzy similarity over UNIQUE pairs using pdist (upper triangle vector)
-% % Falls back to blockwise if pdist runs out of memory.
-% try
-%     D = pdist(X, 'chebychev');     % 1×(N*(N-1)/2) vector
-%     switch kernelType
-%         case 'exponential'
-%             mu = exp(-(D.^n) / r);
-%         case 'gaussian'
-%             mu = exp(-(D.^2) / (2*r^2));
-%         otherwise
-%             mu = exp(-(D.^n) / r);
-%     end
-%     mu_mean = mean(mu);
-% catch
-%     % OOM or other -> fallback
-%     mu_mean = fuzzy_mean_similarity_block(X, r, n, kernelType, 256); % smaller blk is fine
-% end
-% end
-
 
 function y = fuzzy_kernel(d, r, n, kernelType)
 switch kernelType

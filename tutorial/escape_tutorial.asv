@@ -19,7 +19,9 @@ eeglab; close;
 pluginPath = fileparts(which('eegplugin_escape.m'));
 cd(pluginPath)
 EEG = pop_loadset('filename','sample_data.set','filepath',fullfile(pluginPath,'tutorial'));
-
+EEG = ref_infinity(EEG); 
+% EEG = apply_car(EEG);
+% EEG = csd_transform(EEG);
 
 %% Sample Entropy (SampEn) via GUI
 
@@ -34,33 +36,50 @@ EEG = escape_compute(EEG, 'measure', 'SampEn');
 % % Outputs can be found in:
 % EEG.escape.SampEn
 
-
-%% SampEn tuning some parameters
-
-[EEG, com] = escape_compute(EEG, 'measure', 'SampEn', 'chanlist', 'Cz Fz Pz Oz', ...
-    'tau', 1, 'm', 2, 'parallel', false, 'progress', true, 'vis', true);
+% Fine-tuning parameters (for demonstration only)
+[EEG, com] = escape_compute(EEG, 'measure', 'SampEn', ...
+    'chanlist', 'Cz Fz F3 F4 Pz Oz O1 O2', ...   % channel selection
+    'tau', 2, ...
+    'm', 3, ...
+    'r', .5, ...
+    'parallel', false, ...
+    'progress', true, ...
+    'vis', true);
 
 %% Fuzzy entropy (FuzzEn)
 
-EEG = escape_compute(EEG,'measure', 'FuzzEn', 'n', 2, ...
-    'Kernel','exponential', 'BlockSize', 256, ...
-    'parallel', true);
+% default parameters
+EEG = escape_compute(EEG, 'measure', 'FuzzEn');
+
+% Fine-tuning parameters (for demonstration only)
+EEG = escape_compute(EEG, 'measure', 'FuzzEn', ...
+    'n', 2, ...
+    'kernel','gaussian', ...
+    'blocksize', 128);
 
 
 %% Extrema-Segmented Entropy (ExSEnt)
 
-EEG = escape_compute(EEG,'ExSEnt');
+EEG = escape_compute(EEG,'measure', 'ExSEnt', 'r', .15);
 
 %% Fractal dimension (votality)
 
-EEG = escape_compute(EEG,'FracDim');
+EEG = escape_compute(EEG,'measure', 'FracDim');
 
 
 %% Multiscale entropy (MSE)
 
-% Multiscale entropy with default parameters, on 10 time scales
-coarsing = 'median';  % 'median' 'mean' 'sd' 'variance'
-EEG = escape_compute(EEG,'MSE',[],[],[], coarsing, 12, true);
+EEG = escape_compute(EEG, 'measure', 'MSE', ...
+    'coarsing', 'median', ...     % 'median' (default) 'mean' 'trimmed mean' 'std' 'variance'
+    'num_scales', 20, 'parallel', true, 'progress', true);
+
+%% Modified MSE (mMSE)
+
+EEG = escape_compute(EEG, 'measure', 'mMSE', ...
+    'coarsing', 'std', ... % 'median' (default) 'mean' 'std' 'variance'
+    'num_scales', 50, ...
+    'filter_mode', 'none', ... %  'narrowband' (default, annuli) | 'lowpass' | 'highpass' | 'none'
+    'parallel', true);
 
 
 %% Multiscale fuzzy entropy (MFE)

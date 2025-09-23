@@ -130,6 +130,12 @@ else
                 kernel_meth = val;
             case 'blocksize'
                 blocksize = double(val);
+            case 'filter_mode'
+                filter_mode = val;
+            case 'TimeWin'
+                TimeWin = double(val);
+            case 'TimeStep'
+                TimeStep = double(val);
             otherwise
                 error('Unknown option: %s', key);
         end
@@ -175,25 +181,28 @@ if ~exist('parallel','var') || isempty(paraComp)
 end
 
 % multiscale parameters
-if contains(lower(measure), {'mse' 'mfe' 'rcmfe'})
+if contains(lower(measure), {'mse' 'mmse' 'mfe' 'rcmfe' })
     if ~exist('coarsing','var') || isempty(coarsing)
         disp('No coarse graining method selected: selecting standard deviation (default).')
-        coarsing = 'Standard deviation';
+        coarsing = 'std';
     end
     if ~exist('num_scales','var') || isempty(num_scales)
         disp('Number of scale factors not selected: selecting num_scales = 30 (default).')
         num_scales = 30;
     end
-    if ~exist('filt_scales','var') || isempty(filt_scales)
-        filt_scales = false;
+    if ~exist('filter_mode','var') || isempty(filter_mode)
+        filter_mode = 'none';
         disp("Filtering each scale factor (from Kosciessa et al. 2017) set to: OFF.")
     else
         disp("Filtering each scale factor (from Kosciessa et al. 2017) set to: ON.")
     end
-else
-    coarsing = [];
-    num_scales = [];
-    filt_scales = [];
+    if ~exist('TimeWin','var') || ~exist('TimeStep','var') || isempty(TimeWin) || isempty(TimeStep)
+        TimeWin = [];
+        TimeStep = [];
+        disp("mMSE time-resolved mode set to: OFF.")
+    else
+        disp("mMSE time-resolved mode set to: ON.")
+    end
 end
 
 % Fuzzy parameters
@@ -239,97 +248,66 @@ else
 end
 scales = {};
 
+% FIXME: for multiscale measures:
+% Determine max number of scales using file length. As a rough guideline, 
+% some researchers suggest having at least 10 times as many data points as 
+% the embedding dimension m used in the entropy calculation. For instance, 
+% if you are using an embedding dimension of 2, you might want to have at 
+% least 20 data points in each coarse-grained time series. So, the maximum 
+% scale factor τ_max that you could use would be approximately N/20 when 
+% using an embedding dimension of 2.
+
 % COMPUTE ENTROPY/COMPLEXITY MEASURES
 switch measure
 
     % Sample Entropy (SampEn)
     case 'SampEn'
-        % entropy = compute_SampEn(data, 'm', m, 'tau', tau, 'Parallel', parallelComp);
-        entropy = compute_SampEn(data, 'm', m, 'r', r, 'parallel', paraComp, 'progress', trackProg);
-
+        entropy = compute_SampEn(data, 'm', m, 'r', r, ...
+            'parallel', paraComp, 'Progress', trackProg);
         
     % Fuzzy Entropy (FuzzEn)
     case 'FuzzEn'
-        % kernel_meth = 'exponential'; % 'exponential' (default) or 'gaussian'
         entropy = compute_FuzzEn(data, 'm', m, 'tau', tau, 'n', n, 'r', r, ...
-            'Kernel', kernel_meth, 'BlockSize',blocksize, 'Parallel', paraComp, 'progress', trackProg);
+            'Kernel', kernel_meth, 'BlockSize',blocksize, ...
+            'Parallel', paraComp, 'Progress', trackProg);
 
     % Extrema-Segmented Entropy (ExSEnt)    
     case 'ExSEnt'
-        % HD = nan(nChan,1);
-        % HA = nan(nChan,1);
-        % HDA = nan(nChan,1);
-        % parfor iChan = 1:nChan
-        %     fprintf('channel %g/%g\n', iChan, nChan)
-        %     [HD(iChan,:), HA(iChan,:), HDA(iChan,:)] = compute_ExSEnt(data(iChan,:), 0.001, m, r);
-        % end
-
-        [HD, HA, HDA, info] = compute_ExSEnt2(data, 'm', m, ...
-            'r', r, 'lambda', 0.001, 'Plot', false, ...  % add these options to GUI/command?
-            'Parallel', paraComp);
+        [HD, HA, HDA, info] = compute_ExSEnt2(data, 'm', m, 'r', r, ...
+            'lambda', 0.001, 'Plot', false, ...
+            'Parallel', paraComp, 'Progress', trackProg);
 
     % Fractal Dimension (FracDim)
     case 'FracDim'
-        progressbar('Computing fractal dimension on all channels')
-        % for iChan = 1:nChan
-        %     [entropy(iChan,:), sd] = fractal_volatility(data(iChan,:)');
-        %     progressbar(iChan / nChan);
-        % end
         [entropy, SD, info] = compute_FracDim(data, ...
             'RejectBursts', true, 'WinFrac', 0.02, 'ZThresh', 6, ...
-            'RobustFit', 'ols', ... %  'theilsen' | 'ols'
-            'ScaleTrimIQR', true, 'MinJ', [], 'MaxJ', [], ...
-            'Parallel', paraComp);
+            'RobustFit', 'theilsen', ... %  'theilsen' (default) or 'ols'
+            'ScaleTrimIQR', true, ...
+            'Parallel', paraComp, 'Progress', trackProg);
 
     case 'MSE'
-
-        % % Origianl Costa 2002 MSE
-        % parfor iChan = 1:nChan
-        %     fprintf('channel %g/%g\n',iChan, nChan);
-        %     % [ entropy(iChan,:), A, B ] = mse(data(iChan,:));
-        %     entropy(iChan,:) = compute_mse_costa(data(iChan,:), m, .15, tau, 'mean', num_scales, filt_scales, fs)
-        % end
-        % if ~filt_scales
-        %     scales = arrayfun(@(x) {num2str(x)}, 1:num_scales);
-        % end
         
-      % Enhanced classic MSE
-      % [entropy, scales] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
-      %     'FilterMode', 'none', 'coarsing', coarsing, 'num_scales', num_scales, ...
-      %     'Parallel', parallelComp, 'Progress', true);           
+        % Classic MSE
+        [entropy, scales] = compute_MSE(data, 'm', m, 'tau', tau, ...
+            'coarsing', coarsing, 'num_scales', num_scales, ...
+            'Parallel', paraComp, 'Progress', trackProg);
          
-         if filt_scales 
-             % Kosciessa-style narrowband MSE (default): annuli passbands + filter-skip
-             filter_mode = 'narrowband';  %  'narrowband' (default, annuli) | 'lowpass' | 'highpass' | 'none'
-         else
-             filter_mode = 'none';
-         end
+    case 'mMSE'
 
-         [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, 'r', r, ...
-              'FilterMode', filter_mode, 'coarsing', coarsing, 'num_scales', num_scales, ...
-              'Parallel', paraComp, 'Progress', true);
+        % Modified MSE (Fieldtrip style, with Kosciessa filtering option)
+         [entropy, scales, info] = compute_mMSE(data, 'm', m, 'tau', tau, 'r', r, ...
+              'coarsing', coarsing, 'num_scales', num_scales, ...
+              'Parallel', paraComp, 'Progress', true, ...
+              'filter_mode', filter_mode, 'fs', fs, ...
+              'TimeWin', TimeWin, 'TimeStep', TimeStep); % for time-resolved version
 
-          % % Time-resolved version
-          % [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
-          %      'FilterMode', filter_mode, 'coarsing', coarsing, 'num_scales', num_scales, ...
-          %     'TimeWin', 2, 'TimeStep', 1, ...
-          %     'Parallel', parallelComp, 'Progress', true);
-
-          
     case 'MFE'
         % [entropy, scales] = compute_mfe(data, ...
         %     m, r, tau, coarsing, num_scales, filt_scales, EEG.srate, n);
 
-         filter_mode = 'narrowband';  %  'narrowband' (default, annuli) or 'none'
-         [entropy, scales, info] = compute_mfe(EEG, 'Fs', fs, 'm', m, 'tau', tau, 'r', r, ...
-              'FilterMode', filter_mode, 'coarsing', coarsing, 'num_scales', num_scales, ...
+         [entropy, scales, info] = compute_MFE(EEG, 'Fs', fs, 'm', m, ...
+             'tau', tau, 'r', r, 'coarsing', coarsing, 'num_scales', num_scales, ...
               'Parallel', paraComp, 'Progress', true);
-
-          % % Time-resovled version
-          % [entropy, scales, info] = compute_mse(EEG, 'Fs', fs, 'm', m, 'tau', tau, ...
-          %      'FilterMode', filter_mode, 'coarsing', coarsing, 'num_scales', num_scales, ...
-          %     'TimeWin', 2, 'TimeStep', 1, ...
-          %     'Parallel', parallelComp, 'Progress', true);
 
 
     case 'RCMFE'
