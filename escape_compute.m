@@ -285,36 +285,35 @@ switch measure
             'ScaleTrimIQR', true, ...
             'Parallel', paraComp, 'Progress', trackProg);
 
+    % Multiscale Entropy (MSE)
     case 'MSE'
         
         % Classic (enhanced) Costa MSE
         [entropy, scales] = compute_MSE(data, 'm', m, 'tau', tau, ...
             'coarsing', coarsing, 'num_scales', num_scales, ...
             'Parallel', paraComp, 'Progress', trackProg);
-         
+
+    % Modified Multiscale Entropy (mMSE; from Kloosterman and Kosciessa, implemented in Fieldtrip)
     case 'mMSE'
 
-        % Modified MSE (Fieldtrip style, with Kosciessa filtering option)
-         [entropy, scales, info] = compute_mMSE(data, 'm', m, 'tau', tau, 'r', r, ...
+        [entropy, scales, info] = compute_mMSE(data, 'm', m, 'tau', tau, 'r', r, ...
               'coarsing', coarsing, 'num_scales', num_scales, ...
               'Parallel', paraComp, 'Progress', true, ...
               'filter_mode', filter_mode, 'fs', fs, ...
               'TimeWin', TimeWin, 'TimeStep', TimeStep); % for time-resolved version
 
+    % Multiscale Fuzzy Entropy (MFE)
     case 'MFE'
 
          [entropy, scales] = compute_MFE(data, 'm', m, ...
              'tau', tau, 'r', r, 'coarsing', coarsing, 'num_scales', num_scales, ...
               'Parallel', paraComp, 'Progress', true);
 
-
+    % Refined Composite Multiscale Fuzzy Entropy (RCMFE)
     case 'RCMFE'
-        parfor iChan = 1:nChan
-            fprintf('channel %g/%g\n',iChan, nChan);
-            entropy(iChan,:) = compute_rcmfe(data(iChan,:), ...
-                m, .15, tau, coarsing, num_scales, fs, n, false);
-        end
-        scales = arrayfun(@(x) {num2str(x)}, 1:num_scales);
+            [entropy, scales] = compute_RCMFE(data, 'm', m, 'tau', tau, ...
+                'r', r, 'n', n, 'coarsing', coarsing, 'num_scales', num_scales, ...
+                'Parallel', paraComp, 'Progress', true);
 
     % % Spectral entropy (SpecEn) - Over time
     % case 'SpecEn' 

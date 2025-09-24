@@ -1,6 +1,6 @@
-%% Tutorial for the ASCENT EEGLAB plugin.
+%% Tutorial for the ESCAPE EEGLAB plugin.
 % 
-% Copyright (C) - ASCENT EEGLAB PLUGIN - Cedric Cannard, 2021-2025
+% Copyright (C) - ESCAPE EEGLAB PLUGIN - Cedric Cannard, 2021-2025
 
 clear; close all; clc
 
@@ -93,16 +93,19 @@ EEG = escape_compute(EEG, 'measure', 'mMSE', ...
     'parallel', true, 'progress', true);
 
 
-%% Multiscale fuzzy entropy (MFE)
-
-EEG = escape_compute(EEG,'MFE',[],[],[], coarsing, 10, false);
-
-
-%% Multiscale fuzzy entropy (MFE)
+%% Multiscale Fuzzy Entropy (MFE)
 
 EEG = escape_compute(EEG, 'measure', 'MFE', ...
+    'coarsing', 'median', ...     % 'median' (default) 'mean' 'trimmed mean' 'std' 'var'
+    'num_scales', 30, ...       % number of scale factors to compute (default = 20; range = 5-100 depending on sample rate)
+    'n', 2, ...                 % fuzzy power (default = 2)
+    'parallel', true, 'progress', true);
+
+%% Refined Composite Multiscale Fuzzy Entropy (RCMFE)
+
+EEG = escape_compute(EEG, 'measure', 'RCMFE', ...
     'coarsing', 'std', ...     % 'median' (default) 'mean' 'trimmed mean' 'std' 'var'
-    'num_scales', 20, ...       % number of scale factors to compute (default = 20; range = 5-100 depending on sample rate)
+    'num_scales', 10, ...       % number of scale factors to compute (default = 20; range = 5-100 depending on sample rate)
     'n', 2, ...                 % fuzzy power (default = 2)
     'parallel', true, 'progress', true);
 
