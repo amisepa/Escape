@@ -1,4 +1,4 @@
-function [measType, chanlist, tau, m, coarseType, nScales, filtData, n, vis, parallelComp] = escape_compute_gui(EEG)
+function [measType, chanlist, tau, m, coarseType, nScales, filtData, n, vis, parallelComp] = ascent_compute_gui(EEG)
 % Minimal wrapper that produces 3 GUIs and returns values.
 
 measType = []; chanlist = []; tau = []; m = [];
@@ -6,7 +6,7 @@ coarseType = []; nScales = []; filtData = []; n = [];
 vis = true; parallelComp = false;
 
 % --- GUI #1: type + channels + tau + m + plot
-meas = {'SampEn' 'FuzzEn' 'ExSEnt' 'FracDim' 'MSE' 'MFE' 'RCMFE'};
+meas = {'SampEn' 'FuzzEn' 'ExSEnt' 'FracDim' 'MSE' 'mMSE' 'MFE' 'RCMFE'};
 uigeom = { [.5 .9] .5 [.5 .4 .2] .5 [.5 .1] .5 [.5 .1] .5 .5};
 uilist = {
     {'style' 'text' 'string' 'Measure to compute:' 'fontweight' 'bold'}
@@ -25,7 +25,7 @@ uilist = {
     {}
     {'style' 'checkbox' 'string' 'Plot outputs?' 'tag' 'vis' 'value' 1 'fontweight' 'bold'}
     };
-param = inputgui(uigeom, uilist, 'pophelp(''pop_entropy'')','entropy EEGLAB plugin', EEG);
+param = inputgui(uigeom, uilist, 'pophelp(''ascent_compute'')','Ascent EEGLAB plugin', EEG);
 if isempty(param), return; end
 measType = meas{param{1}};
 if ~isempty(param{2})
@@ -50,7 +50,7 @@ if contains(lower(measType), {'mse' 'mfe' 'rcmfe'})
         {}
         {'style' 'checkbox' 'string' 'Filter at each scale factor (see Kosciessa et al. 2020)?','tag' 'filtscales','value',0}
         };
-    param = inputgui(uigeom, uilist, 'pophelp(''pop_escape'')','Escape EEGLAB plugin', EEG);
+    param = inputgui(uigeom, uilist, 'pophelp(''ascent_compute'')','Ascent EEGLAB plugin', EEG);
     if ~isempty(param)
         coarseType = cTypes{param{1}};
         nScales    = str2double(param{2});
@@ -63,7 +63,7 @@ if contains(lower(measType), {'fe' 'mfe'})
     uigeom = { [.9 .3] };
     uilist = { {'style' 'text' 'string' 'Fuzzy power:' }
                {'style' 'edit' 'string' '2' 'tag' 'n'}  };
-    param = inputgui(uigeom, uilist, 'pophelp(''pop_entropy'')','entropy EEGLAB plugin', EEG);
+    param = inputgui(uigeom, uilist, 'pophelp(''ascent_compute'')','Ascent EEGLAB plugin', EEG);
     if ~isempty(param)
         n = str2double(param{1});
     end

@@ -118,9 +118,8 @@ function [mse, scales, info] = compute_mMSE(data, varargin)
 %   Kosciessa et al., (2020). Standard multiscale entropy reflects neural 
 %       dynamics at mismatched temporal scales. PLoS Comput Biol, 16(5), e1007885. 
 %
-%   Kloosterman et al., (2020). Modified multiscale entropy (mMSE): implementation 
-%       details & time-resolved analysis; note scale-wise normalization of 
-%       r and recommended samples per scale. eLife, 9:e54201. 
+%   Kloosterman et al., (2020). Boosts in brain signal variability track 
+%       liberal shifts in decision bias. Elife, 9, e54201.
 % 
 %   Grandy et al. (2016). On data requirements for accurate MSE in 
 %       neurophysiology; practical guidance on minimum samples per scale 
@@ -128,7 +127,7 @@ function [mse, scales, info] = compute_mMSE(data, varargin)
 %
 % -------------------------------------------------------------------------
 % Copyright (C) 2025
-% EEGLAB Escape plugin — Author: Cedric Cannard
+% EEGLAB Ascent plugin — Author: Cedric Cannard
 % License: GNU GPL v2 or later
 % -------------------------------------------------------------------------
 

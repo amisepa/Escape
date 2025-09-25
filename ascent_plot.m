@@ -1,5 +1,5 @@
-function escape_plot(entropyData, chanlocs, entropyType, scales, varargin)
-% escape_plot  Visualize uni/multi/time-resolved entropy with robust NaN handling.
+function ascent_plot(entropyData, chanlocs, entropyType, scales, varargin)
+% ascent_plot  Visualize uni/multi/time-resolved entropy with robust NaN handling.
 %
 % entropyData : [chan x scale] or [chan x scale x time]
 % chanlocs    : EEGLAB channel locations

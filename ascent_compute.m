@@ -1,9 +1,7 @@
-function [EEG, com] = escape_compute(EEG, varargin)
+function [EEG, com] = ascent_compute(EEG, varargin)
 
-%% EEGLAB plugin to compute entropy-based measures on M/EEG data.
-% Also works on other types of biosignals (e.g., ECG, HRV).
-% Founded on code developed by Costa et al. (2002) and Azami and Escudero
-% (2017).
+%% EEGLAB plugin to compute brain entropy- and complexity-based measures on M/EEG data.
+% Also works for any types of biosignal time series (e.g., ECG, PPG, RR intervals, etc.).
 %
 % INPUTS:
 %   EEG - EEG structure in EEGLAB format
@@ -22,30 +20,16 @@ function [EEG, com] = escape_compute(EEG, varargin)
 %   1) Import EEG data into EEGLAB
 %   2) Preprocess as necessary (e.g., reference, clean data with ASR, etc.)
 %   3) GUI mode: Tools > Compute entropy
-% or
-%   EEG = escape_compute(EEG);     % launch GUI mode
-% or
-%   EEG = escape_compute(EEG, 'FuzzEn',{'Fpz' 'Cz'},[],[],'Variance');
-%                                       % compute fuzzy entropy only on Fpz
-%                                       % and Cz channels with default tau
-%                                       % and m but using variance for the
-%                                       % coarse-graining
-% or
-%   EEG = escape_compute(EEG,'MFE',[],[],[],[],50,true,[],0);
-%                                       % compute multiscale fuzzy entropy
-%                                       % on all channels with default
-%                                       % parameters but on 50 time scales,
-%                                       % controlling for spectral bias, and
-%                                       % turning plotting OFF.
 %
+%   EEG = ascent_compute(EEG);     % launch GUI mode
 %
-% Copyright - Cedric Cannard, 2022
+% Copyright - Ascent EEGLAB plugin, Cedric Cannard, 2022
 
 
 tstart = tic;
 
 % add path to subfolders
-plugin_path = fileparts(which('eegplugin_escape.m'));
+plugin_path = fileparts(which('eegplugin_ascent.m'));
 addpath(genpath(plugin_path));
 
 % Basic checks and warnings (unchanged)
@@ -82,7 +66,7 @@ paraComp    = false;
 % -----------------------------
 if nargin == 1 || (nargin == 2 && isempty(varargin{1}))
     [measure, chanlist, tau, m, coarsing, num_scales, filt_scales, n, vis, paraComp] = ...
-        escape_compute_gui(EEG);
+        ascent_compute_gui(EEG);
 else
     if mod(numel(varargin),2) ~= 0
         error('Options must be provided as name–value pairs.');
@@ -347,16 +331,16 @@ end
 if vis
     if nChan>1
         if strcmpi(measure, 'ExSEnt')
-            escape_plot(HD, chanlocs, 'SampEn of durations', scales);
-            escape_plot(HA, chanlocs, 'SampEn of amplitudes', scales);
-            escape_plot(HDA, chanlocs, 'Joint SampEn of durations & amplitudes', scales);
+            ascent_plot(HD, chanlocs, 'SampEn of durations', scales);
+            ascent_plot(HA, chanlocs, 'SampEn of amplitudes', scales);
+            ascent_plot(HDA, chanlocs, 'Joint SampEn of durations & amplitudes', scales);
         else
             % % Standard plot
-            escape_plot(entropy, chanlocs, measure, scales);
+            ascent_plot(entropy, chanlocs, measure, scales);
 
             % Time-resolved plot
             if strcmpi(measure, 'mMSE') && ~isempty(TimeStep)
-                escape_plot(info.mse_time, EEG.chanlocs, 'Time-resolved mMSE', scales, info.time_sec);
+                ascent_plot(info.mse_time, EEG.chanlocs, 'Time-resolved mMSE', scales, info.time_sec);
             end
         end
     else
@@ -366,16 +350,16 @@ end
 
 % outputs to export in EEG structure
 if strcmpi(measure, 'ExSEnt')
-    EEG.escape.(measure).data.HD = HD;
-    EEG.escape.(measure).data.HA = HA;
-    EEG.escape.(measure).data.HDA = HDA;
+    EEG.ascent.(measure).data.HD = HD;
+    EEG.ascent.(measure).data.HA = HA;
+    EEG.ascent.(measure).data.HDA = HDA;
 else
-    EEG.escape.(measure).data = entropy;
+    EEG.ascent.(measure).data = entropy;
 end
-EEG.escape.(measure).electrode_labels = chanLabels;
-EEG.escape.(measure).electrode_locations = chanlocs;
+EEG.ascent.(measure).electrode_labels = chanLabels;
+EEG.ascent.(measure).electrode_locations = chanlocs;
 if contains(lower(measure), {'mse' 'mfe' 'rcmfe'})
-    EEG.escape.(measure).scales = scales;
+    EEG.ascent.(measure).scales = scales;
 end
 
 % ADD PARAMETERS USED IN STRUCTURE OUTPUT 
@@ -385,9 +369,9 @@ end
 chanLabels = strjoin(chanlist);
 chanLabels = insertBefore(chanLabels," ", "'");
 chanLabels = insertAfter(chanLabels," ", "'");
-com = sprintf('EEG = escape_compute(''%s'', {''%s''}, %d, %d, %s, %d, %d, %s, %d);', ...
+com = sprintf('EEG = ascent_compute(''%s'', {''%s''}, %d, %d, %s, %d, %d, %s, %d);', ...
     measure,chanLabels,tau,m,coarsing,num_scales,filt_scales,'[]',vis);
 
-disp('Done computing with Escape! Outputs can be found in the EEG.escape structure.')
+disp('Done computing with Ascent! Outputs can be found in the EEG.ascent structure.')
 fprintf('Time to compute: %.2f minutes. \n', toc(tstart)/60)
 

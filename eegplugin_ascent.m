@@ -1,8 +1,6 @@
-% eegplugin_escape()
+% eegplugin_ascent()
 %
-% ESCAPE: Entropy and Signal Complexity Analysis Plugin for EEG/MEG
-%
-% Alternative name ASCENT: Aperiodic Signal Complexity Estimation for Neurophysiological Time series
+%  ASCENT: Aperiodic Signal Complexity Estimation for Neurophysiological Time series
 %
 % Copyright (C) - EEGLAB, Cedric Cannard, August 2022-2025
 %
@@ -20,22 +18,22 @@
 % along with this program; if not, write to the Free Software
 % Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 
-function vers = eegplugin_escape(fig,try_strings,catch_strings)
+function vers = eegplugin_ascent(fig,try_strings,catch_strings)
 
 % Plugin version
 vers = '1.2';
 
 % Add paths to subfolders
-p = fileparts(which('eegplugin_escape.m'));
+p = fileparts(which('eegplugin_ascent.m'));
 addpath(p);
 addpath(fullfile(p,'functions'))
 
-cmd = [ try_strings.check_data '[EEG,LASTCOM] = escape_compute(EEG);' ...
+cmd = [ try_strings.check_data '[EEG,LASTCOM] = ascent_compute(EEG);' ...
         catch_strings.new_and_hist ];
 
 % create menu
 toolsmenu = findobj(fig, 'tag', 'tools');
-uimenu(toolsmenu, 'label', 'Compute entropy', 'userdata', 'startup:off;epoch:off;study:off', ...
+uimenu(toolsmenu, 'label', 'Compute entropy/complexity measures', 'userdata', 'startup:off;epoch:off;study:off', ...
     'callback', cmd, 'position', 15);
 
 end

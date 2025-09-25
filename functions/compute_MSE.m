@@ -37,7 +37,7 @@ function [MSE, scales] = compute_MSE(data, varargin)
 %
 % -------------------------------------------------------------------------
 % Copyright (C) 2025
-% EEGLAB Escape plugin — Author: Cedric Cannard
+% EEGLAB Ascent plugin — Author: Cedric Cannard
 % License: GNU GPL v2 or later
 % -------------------------------------------------------------------------
 

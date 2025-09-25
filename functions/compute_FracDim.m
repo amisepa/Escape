@@ -32,7 +32,7 @@ function [D, SD, info] = compute_FracDim(data, varargin)
 %
 % -------------------------------------------------------------------------
 % Copyright (C) 2025
-% EEGLAB Escape Plugin — Author: Cedric Cannard
+% EEGLAB Ascent Plugin — Author: Cedric Cannard
 % License: GNU GPL v2 or later
 % -------------------------------------------------------------------------
 
