@@ -11,6 +11,7 @@ Uniscale measures:
 
 Multiscale measures:
 - Multiscale entropy (MSE; enhanced version of Costa 2002)
+- Modified Multiscale entropy (mMSE; enhanced version of Kloosterman 2020 and Kosciessa 2020)
 - Multiscale fuzzy entropy (MFE; enhanced version of Azami 2017)
 - Extrema-segmented entropy analysis of time series (ExSEnt; enhanced version of Kamali 2025)
 - Refined composite multiscale fuzzy entropy (RCMFE; enhanced version of Azami 2017)
