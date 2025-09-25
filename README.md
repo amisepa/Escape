@@ -1,21 +1,20 @@
-# Escape EEGLAB plugin: Entropy and Signal Complexity Analysis Plugin for EEG/MEG 
+# ASCENT EEGLAB plugin: Aperiodic Signal Complexity Estimation for Neurophysiological Time series
 
-The Escape EEGLAB plugin computes entropy and complexity measures from multidiemnsional M/EEG data (or any physiological time series).
+The Escape EEGLAB plugin computes entropy and complexity measures from multidimensional M/EEG data (or any other time series).
 
 ## Entropy measures available
 
-Uniscale Entropy:
-- Sample entropy
-- Fuzzy entropy
+Uniscale measures:
+- Sample entropy (SampEn)
+- Fuzzy entropy (FuzzEn)
+- Fractal Dimension/Volatility (FracDim)
 
-Multiscale Entropy:
-- Multiscale entropy
-- Multiscale fuzzy entropy
+Multiscale measures:
+- Multiscale entropy (MSE)
+- Multiscale fuzzy entropy (MFE)
 - Refined composite multiscale fuzzy entropy (RCMFE)
+- Spectral entropy (SpecEn)
 
-Entropy over time (Spectral entropy)
-
-Fractal Dimension
 
 ## Requirements
 
