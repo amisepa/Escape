@@ -22,10 +22,6 @@ Multiscale measures:
 - EEGLAB
 
 
-## Tutorial
-
-Go to Wiki page: https://github.com/amisepa/Ascent/wiki
-
 ## Please cite 
 
 https://psyarxiv.com/xwmyk/
