@@ -109,24 +109,3 @@ EEG = escape_compute(EEG, 'measure', 'RCMFE', ...
     'n', 2, ...                 % fuzzy power (default = 2)
     'parallel', true, 'progress', true);
 
-
-%% 
-% % if you change your mind and want to see the plot, you can do so with:
-% escape_plot(EEG.escape.SampEn.data, EEG.escape.SampEn.electrode_locations, 'SampEn')
-
-% same but only on channels F3 and F4 (and plotting On)
-EEG = escape_compute(EEG,'MFE',{'F3' 'F4'},[],[],[],10,[],[],true,false);
-
-% Same but using bandpass filtering at each time scale to control for
-% spectral contamination (and plotting On)
-EEG = escape_compute(EEG,'MFE',{'F3' 'F4'},[],[],[],10,true,[],true);
-
-% EEG = escape_compute(EEG);   % GUI mode
-% EEG = escape_compute(EEG,'Approximate entropy');
-% EEG = escape_compute(EEG,'Sample entropy');
-% EEG = escape_compute(EEG,'Fuzzy entropy',{'Cz'});
-% EEG = escape_compute(EEG,'Multiscale entropy', {'Cz' 'O1' 'Fz'}, [],[],[],30);
-% EEG = escape_compute(EEG,'Multiscale fuzzy entropy', {'Cz' 'O1' 'Fz'}, [],[],[],30);
-% EEG = escape_compute(EEG, 'Sample entropy',[], 1, 2, 'Mean', 1, 2);
-% EEG = escape_compute(EEG, 'Multiscale entropy', {EEG.chanlocs.labels}, 1, 2, 'Standard deviation',15,1,[],1);
-
