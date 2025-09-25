@@ -10,10 +10,10 @@ Uniscale measures:
 - Fractal Dimension/Volatility (FracDim)
 
 Multiscale measures:
-- Multiscale entropy (MSE)
-- Multiscale fuzzy entropy (MFE)
-- Refined composite multiscale fuzzy entropy (RCMFE)
-- Spectral entropy (SpecEn)
+- Multiscale entropy (MSE; enhanced version of Costa 2002)
+- Multiscale fuzzy entropy (MFE; enhanced version of Azami 2017)
+- Extrema-segmented entropy analysis of time series (ExSEnt; enhanced version of Kamali 2025)
+- Refined composite multiscale fuzzy entropy (RCMFE; enhanced version of Azami 2017)
 
 
 ## Requirements
